@@ -1,6 +1,3 @@
-[submodule "wise_ils"]
-	path = wise_ils
-	url = https://github.com/qscgy/wise_ils
 [submodule "PRM"]
 	path = PRM
 	url = https://github.com/qscgy/PRM
