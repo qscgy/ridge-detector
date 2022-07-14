@@ -2,9 +2,9 @@ import numpy as np
 import cv2
 
 if __name__=="__main__":
-    img_path = '/bigpen/Datasets/jhu-released/t4v3/100_depth.tiff'
+    img_path = '/bigpen/Datasets/jhu-released/t4v3/0_color.png'
     img = cv2.imread(img_path)
-    # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     edges = cv2.Canny(img, threshold1=10, threshold2=100)
     _, markers = cv2.connectedComponents(edges)
