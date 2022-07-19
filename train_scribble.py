@@ -5,19 +5,19 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-from ..rloss.pytorch.deeplabv3plus.mypath import Path
-from ..rloss.pytorch.deeplabv3plus.dataloaders import make_data_loader
-from ..rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
-from ..rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
-from ..rloss.pytorch.deeplabv3plus.modeling.deeplab import *
-from ..rloss.pytorch.deeplabv3plus.utils.loss import SegmentationLosses
-from ..rloss.pytorch.deeplabv3plus.utils.calculate_weights import calculate_weigths_labels
-from ..rloss.pytorch.deeplabv3plus.utils.lr_scheduler import LR_Scheduler
-from ..rloss.pytorch.deeplabv3plus.utils.saver import Saver
-from ..rloss.pytorch.deeplabv3plus.utils.summaries import TensorboardSummary
-from ..rloss.pytorch.deeplabv3plus.utils.metrics import Evaluator
+from data import make_data_loader
 
-from ..rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
+from rloss.pytorch.deeplabv3plus.mypath import Path
+from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
+from rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
+from rloss.pytorch.deeplabv3plus.modeling.deeplab import *
+from rloss.pytorch.deeplabv3plus.utils.loss import SegmentationLosses
+from rloss.pytorch.deeplabv3plus.utils.calculate_weights import calculate_weigths_labels
+from rloss.pytorch.deeplabv3plus.utils.lr_scheduler import LR_Scheduler
+from rloss.pytorch.deeplabv3plus.utils.saver import Saver
+from rloss.pytorch.deeplabv3plus.utils.summaries import TensorboardSummary
+from rloss.pytorch.deeplabv3plus.utils.metrics import Evaluator
+from rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
 
 class Trainer(object):
     def __init__(self, args):
@@ -224,9 +224,9 @@ def main():
                         help='whether to use SBD dataset (default: True)')
     parser.add_argument('--workers', type=int, default=4,
                         metavar='N', help='dataloader threads')
-    parser.add_argument('--base-size', type=int, default=513,
+    parser.add_argument('--base-size', type=int, default=216,
                         help='base image size')
-    parser.add_argument('--crop-size', type=int, default=513,
+    parser.add_argument('--crop-size', type=int, default=216,
                         help='crop image size')
     parser.add_argument('--sync-bn', type=bool, default=None,
                         help='whether to use sync bn (default: auto)')
@@ -235,6 +235,7 @@ def main():
     parser.add_argument('--loss-type', type=str, default='ce',
                         choices=['ce', 'focal'],
                         help='loss func type (default: ce)')
+    parser.add_argument('--base-dir', type=str, help='base directory for data')
     # training hyper params
     parser.add_argument('--epochs', type=int, default=None, metavar='N',
                         help='number of epochs to train (default: auto)')

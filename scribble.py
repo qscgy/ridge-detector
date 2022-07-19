@@ -34,9 +34,10 @@ def copy_random_sample(files, dst, n=200):
         im_dir = im.split('/')[-3]
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
-base_dir = '/playpen/Datasets/scribble-samples'
-# all_images = get_all_images(base_dir)
-all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
+base_dir = '/playpen/Datasets/geodepth2'
+all_images = get_all_images(base_dir)[::5]
+print(len(all_images))
+# all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 
 # copy_random_sample(all_images, 200)
 
@@ -70,12 +71,12 @@ cv2.setMouseCallback('image', draw_circle)
 idx = 0
 annotations = {}
 dump_file = 'folds.pkl'
-bg_dump_file = 'background.pkl'
 if os.path.isfile(dump_file):
     with open(dump_file, 'rb') as f:
         annotations = pickle.load(f)
     if all_images[idx] in annotations:
         points = annotations[all_images[idx]]
+    print(len(annotations.keys()))
 
 while(1):
     cv2.imshow('image', img)
@@ -99,7 +100,10 @@ while(1):
     elif k==ord('a'):
         update_save(annotations, dump_file, all_images[idx], points)
         idx -= 1
-        points = copy.deepcopy(annotations[all_images[idx]])
+        if all_images[idx] in annotations:
+            points = copy.deepcopy(annotations[all_images[idx]])
+        else:
+            points = []
         img = cv2.resize(cv2.imread(all_images[idx]), (540, 432))
         cv2.imshow('image', img)
         restore_lines(points)

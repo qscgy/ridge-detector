@@ -14,9 +14,8 @@ import multiprocessing
 from itertools import repeat
 import pickle
 
+class NormalizedCutLossFunction(Function):
 
-class DenseCRFLossFunction(Function):
-    
     @staticmethod
     def forward(ctx, images, segmentations, sigma_rgb, sigma_xy, ROIs):
         ctx.save_for_backward(segmentations)
@@ -26,41 +25,64 @@ class DenseCRFLossFunction(Function):
         segmentations = torch.mul(segmentations.cuda(), ROIs.cuda())
         ctx.ROIs = ROIs
         
-        densecrf_loss = 0.0
+        ncloss = 0.0
         images = images.numpy().flatten()
         segmentations = segmentations.cpu().numpy().flatten()
         AS = np.zeros(segmentations.shape, dtype=np.float32)
         bilateralfilter_batch(images, segmentations, AS, ctx.N, ctx.K, ctx.H, ctx.W, sigma_rgb, sigma_xy)
-        densecrf_loss -= np.dot(segmentations, AS)
+        ncloss -= np.dot(segmentations, AS)
+
+        one = np.ones_like(segmentations)
+        d = np.zeros_like(AS)
+        bilateralfilter_batch(images, one, d, ctx.N, ctx.K, ctx.H, ctx.W, sigma_rgb, sigma_xy)
+        ctx.d = d
+
+        ncloss /= np.dot(d, segmentations)
     
         # averaged by the number of images
-        densecrf_loss /= ctx.N
+        ncloss /= ctx.N
         
+        # ctx.AS = AS
         ctx.AS = np.reshape(AS, (ctx.N, ctx.K, ctx.H, ctx.W))
-        return Variable(torch.tensor([densecrf_loss]), requires_grad=True)
-        
+        return Variable(torch.tensor([ncloss]), requires_grad=True)
+
     @staticmethod
     def backward(ctx, grad_output):
-        grad_segmentation = -2*grad_output*torch.from_numpy(ctx.AS)/ctx.N
-        grad_segmentation=grad_segmentation.cuda()
+        segmentations = ctx.saved_tensors[0].cpu()
+        d_prime = torch.from_numpy(ctx.d)
+        AS = torch.from_numpy(ctx.AS.flatten())
+
+        segmentations = torch.flatten(segmentations)
+
+        # print(f'AS device: {AS.device}')
+        # print(f'segmentations device: {segmentations.device}')
+        # print(f'd_prime device: {d_prime.device}')
+
+        dS = d_prime @ segmentations
+        
+        grad_segmentation = segmentations * AS * d_prime
+        grad_segmentation /= dS**2
+        grad_segmentation -= (2*AS)/dS
+        grad_segmentation *= grad_output
+        grad_segmentation /= ctx.N
+        grad_segmentation = grad_segmentation.cuda()
+        grad_segmentation = grad_segmentation.reshape(ctx.AS.shape)
         grad_segmentation = torch.mul(grad_segmentation, ctx.ROIs.cuda())
         return None, grad_segmentation, None, None, None
     
-
-class DenseCRFLoss(nn.Module):
+class NormalizedCutLoss(nn.Module):
     def __init__(self, weight, sigma_rgb, sigma_xy, scale_factor):
-        super(DenseCRFLoss, self).__init__()
+        super(NormalizedCutLoss, self).__init__()
         self.weight = weight
         self.sigma_rgb = sigma_rgb
         self.sigma_xy = sigma_xy
         self.scale_factor = scale_factor
     
     def forward(self, images, segmentations, ROIs):
-        """ scale imag by scale_factor """
         scaled_images = F.interpolate(images,scale_factor=self.scale_factor) 
         scaled_segs = F.interpolate(segmentations,scale_factor=self.scale_factor,mode='bilinear',align_corners=False)
         scaled_ROIs = F.interpolate(ROIs.unsqueeze(1),scale_factor=self.scale_factor).squeeze(1)
-        return self.weight*DenseCRFLossFunction.apply(
+        return self.weight*NormalizedCutLossFunction.apply(
                 scaled_images, scaled_segs, self.sigma_rgb, self.sigma_xy*self.scale_factor, scaled_ROIs)
     
     def extra_repr(self):
