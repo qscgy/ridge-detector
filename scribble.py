@@ -1,3 +1,4 @@
+from __future__ import annotations
 from cv2 import EVENT_MOUSEMOVE
 import numpy as np
 import os
@@ -7,6 +8,7 @@ import copy
 import pickle
 import random
 import shutil
+import sys
 
 def get_all_images(base_dir):
     im_dirs = os.listdir(base_dir)
@@ -18,15 +20,6 @@ def get_all_images(base_dir):
             images.extend(natsorted([os.path.join(path, i) for i in os.listdir(path)]))
     return images
 
-def dump(annotations, fname):
-    with open(fname, 'wb') as f:
-        pickle.dump(annotations, f)
-
-def update_save(annotations, fname, img_name, points=[]):
-    if len(points) > 0:
-        annotations[img_name] = copy.deepcopy(points)
-        dump(annotations, fname)
-
 def copy_random_sample(files, dst, n=200):
     files = random.sample(files, n)
     for im in files:
@@ -35,75 +28,103 @@ def copy_random_sample(files, dst, n=200):
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
 base_dir = '/playpen/Datasets/geodepth2'
-all_images = get_all_images(base_dir)[::5]
-print(len(all_images))
-# all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 
+# all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 # copy_random_sample(all_images, 200)
 
-drawing = False
-ix, iy = -1,-1
-points = []
-bg_points = []
+class ScribbleAnnotator:
+    def __init__(self, start_0=True):
+        self.all_images = get_all_images(base_dir)[::5]
+        print(f'Number of image files: {len(self.all_images)}')
+        self.points = []
+        self.drawing = False
+        self.ix, self.iy = -1,-1
+        self.idx = 0
 
-def draw_circle(event, x, y, flags, param):
-    global ix, iy, drawing
-    if event == cv2.EVENT_LBUTTONDOWN:
-        drawing = True
-        ix, iy = x, y
-        points.append([[ix, iy]])   # start drawing
-    elif event == cv2.EVENT_MOUSEMOVE:
-        if drawing:
-            # cv2.circle(img, (x,y), 5, (0,0,255), -1)
-            cv2.line(img, (ix, iy), (x, y), (0,255,0), 2)
-            points[-1].append([x, y])
-            ix, iy = x, y
-    elif event == cv2.EVENT_LBUTTONUP:
-        drawing = False
-
-def restore_lines(lines):
-    for l in lines:
-        cv2.polylines(img, np.array([l], dtype=np.int32), False, (0,255,0), 2)
-
-img = cv2.resize(cv2.imread(all_images[0]), (540, 432))
-cv2.namedWindow('image')
-cv2.setMouseCallback('image', draw_circle)
-idx = 0
-annotations = {}
-dump_file = 'folds.pkl'
-if os.path.isfile(dump_file):
-    with open(dump_file, 'rb') as f:
-        annotations = pickle.load(f)
-    if all_images[idx] in annotations:
-        points = annotations[all_images[idx]]
-    print(len(annotations.keys()))
-
-while(1):
-    cv2.imshow('image', img)
-    if all_images[idx] in annotations:
-        restore_lines(points)
-    k = cv2.waitKey(1) & 0xFF
-
-    if k == 27:
-        update_save(annotations, dump_file, all_images[idx], points)
-        break
-    elif k==ord('d'):
-        update_save(annotations, dump_file, all_images[idx], points)
-        idx += 1
-        img = cv2.resize(cv2.imread(all_images[idx]), (540, 432))
-        cv2.imshow('image', img)
-        if all_images[idx] in annotations:
-            points = copy.deepcopy(annotations[all_images[idx]])
-            restore_lines(points)
+        self.annotations = {}
+        self.dump_file = 'folds.pkl'
+        if os.path.isfile(self.dump_file):
+            with open(self.dump_file, 'rb') as f:
+                self.annotations = pickle.load(f)
+        
+        if start_0 or len(self.annotations.keys())==0:
+            pass
         else:
-            points = []
-    elif k==ord('a'):
-        update_save(annotations, dump_file, all_images[idx], points)
-        idx -= 1
-        if all_images[idx] in annotations:
-            points = copy.deepcopy(annotations[all_images[idx]])
+            ann_keys = natsorted(self.annotations.keys())
+            self.idx = self.all_images.index(ann_keys[-1])
+        self.load_img()
+
+        if self.all_images[self.idx] in self.annotations:
+            self.points = self.annotations[self.all_images[self.idx]]
+       
+    def update_save(self):
+        if len(self.points) > 0:
+            self.annotations[self.all_images[self.idx]] = copy.deepcopy(self.points)
+            with open(self.dump_file, 'wb') as f:
+                pickle.dump(self.annotations, f)
+
+    def draw_lines(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.drawing = True
+            self.ix, self.iy = x, y
+            self.points.append([[self.ix, self.iy]])   # start drawing
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self.drawing:
+                # cv2.circle(img, (x,y), 5, (0,0,255), -1)
+                cv2.line(self.img, (self.ix, self.iy), (x, y), (0,255,0), 2)
+                self.points[-1].append([x, y])
+                self.ix, self.iy = x, y
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.drawing = False
+
+    def load_points(self):
+        if self.all_images[self.idx] in self.annotations:
+            self.points = copy.deepcopy(self.annotations[self.all_images[self.idx]])
         else:
-            points = []
-        img = cv2.resize(cv2.imread(all_images[idx]), (540, 432))
-        cv2.imshow('image', img)
-        restore_lines(points)
+            self.points = []
+
+    def restore_lines(self):
+        for l in self.points:
+            cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (0,255,0), 2)
+
+    def load_img(self):
+        self.img = cv2.resize(cv2.imread(self.all_images[self.idx]), (540, 432))
+
+    def mainloop(self):
+        cv2.namedWindow('image')
+        cv2.setMouseCallback('image', self.draw_lines)
+
+        while(1):
+            cv2.imshow('image', self.img)
+            self.restore_lines()
+            
+            k = cv2.waitKey(1) & 0xFF
+
+            if k==27:
+                self.update_save()
+                break
+            elif k==ord('d'):
+                self.update_save()
+                self.idx += 1
+                self.load_img()
+                cv2.imshow('image', self.img)
+                self.load_points()
+                self.restore_lines()
+            elif k==ord('a'):
+                self.update_save()
+                self.idx -= 1
+                self.load_points()
+                self.load_img()
+                cv2.imshow('image', self.img)
+                self.restore_lines()
+            elif k==ord('r'):
+                if len(self.points) > 0:
+                    self.load_img()
+                    self.points = self.points[:-1]
+                    self.restore_lines()
+                    self.update_save()
+        print(f'Total images with annotations: {len(self.annotations.keys())}')
+
+if __name__=='__main__':
+    scr = ScribbleAnnotator(False)
+    scr.mainloop()
