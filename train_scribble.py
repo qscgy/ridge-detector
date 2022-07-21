@@ -1,6 +1,7 @@
 # Adapted from meng-tang/rloss
 
 import argparse
+from math import ceil
 import os
 import numpy as np
 from tqdm import tqdm
@@ -18,6 +19,7 @@ from rloss.pytorch.deeplabv3plus.utils.saver import Saver
 from rloss.pytorch.deeplabv3plus.utils.summaries import TensorboardSummary
 from rloss.pytorch.deeplabv3plus.utils.metrics import Evaluator
 from rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
+from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 
 class Trainer(object):
     def __init__(self, args):
@@ -29,6 +31,7 @@ class Trainer(object):
         # Define Tensorboard Summary
         self.summary = TensorboardSummary(self.saver.experiment_dir)
         self.writer = self.summary.create_summary()
+        self.total_iters = 0    # global_step for logging; the total number of images passed through
         
         # Define Dataloader
         kwargs = {'num_workers': args.workers, 'pin_memory': True}
@@ -64,7 +67,9 @@ class Trainer(object):
         
         if args.densecrfloss >0:
             self.densecrflosslayer = DenseCRFLoss(weight=args.densecrfloss, sigma_rgb=args.sigma_rgb, sigma_xy=args.sigma_xy, scale_factor=args.rloss_scale)
+            self.nclayer = NormalizedCutLoss(weight=args.densecrfloss, sigma_rgb=15., sigma_xy=40., scale_factor=args.rloss_scale)
             print(self.densecrflosslayer)
+            print(self.nclayer)
         
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
@@ -103,9 +108,10 @@ class Trainer(object):
         train_loss = 0.0
         train_celoss = 0.0
         train_crfloss = 0.0
+        train_ncloss = 0.0
         self.model.train()
         tbar = tqdm(self.train_loader)
-        num_img_tr = len(self.train_loader)
+        num_batch_tr = len(self.train_loader) // self.args.batch_size
         softmax = nn.Softmax(dim=1)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
@@ -127,24 +133,31 @@ class Trainer(object):
                 probs = softmax(output)
                 denormalized_image = denormalizeimage(sample['image'], mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
                 densecrfloss = self.densecrflosslayer(denormalized_image,probs,croppings)
+                normcutloss = self.nclayer(denormalized_image, probs, croppings)
                 if self.args.cuda:
                     densecrfloss = densecrfloss.cuda()
-                loss = celoss + densecrfloss
+                    normcutloss = normcutloss.cuda()
+                loss = celoss + densecrfloss + normcutloss
                 train_crfloss += densecrfloss.item()
+                train_ncloss += normcutloss.item()
             loss.backward()
         
             self.optimizer.step()
             train_loss += loss.item()
             train_celoss += celoss.item()
+
+            self.total_iters += len(sample)
             
-            tbar.set_description('Train loss: %.3f = CE loss %.3f + CRF loss: %.3f' 
-                             % (train_loss / (i + 1),train_celoss / (i + 1),train_crfloss / (i + 1)))
-            self.writer.add_scalar('train/total_loss_iter', loss.item(), i + num_img_tr * epoch)
+            tbar.set_description('Train loss: %.3f CE loss %.3f' 
+                             % (train_loss / (i + 1),train_celoss / (i + 1)))
+            self.writer.add_scalar('train/total_loss_iter', loss.item(), self.total_iters)
+            self.writer.add_scalar('train/ce_loss', train_celoss, self.total_iters)
+            self.writer.add_scalar('train/crf_loss', train_crfloss, self.total_iters)
+            self.writer.add_scalar('train/nc_loss', train_ncloss, self.total_iters)
 
             # Show 10 * 3 inference results each epoch
-            if i % (num_img_tr // 10) == 0:
-                global_step = i + num_img_tr * epoch
-                self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, global_step)
+            if i % (num_batch_tr // 10) == 0:
+                self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, self.total_iters)
 
         self.writer.add_scalar('train/total_loss_epoch', train_loss, epoch)
         print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
@@ -195,7 +208,7 @@ class Trainer(object):
         self.writer.add_scalar('val/Acc_class', Acc_class, epoch)
         self.writer.add_scalar('val/fwIoU', FWIoU, epoch)
         print('Validation:')
-        print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
+        print('[Epoch: %d, numImages: %5d]' % (epoch, len(self.val_loader)))
         print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
         print('Loss: %.3f' % test_loss)
 

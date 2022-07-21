@@ -37,11 +37,11 @@ class FoldSegmentation(Dataset):
         self.scribble_dir = os.path.join(self.base_dir, 'annotations')
         self.split = split
 
-        self.images = glob.glob(os.path.join(self.base_dir, '*.jpg'))
-        self.images.extend(glob.glob(os.path.join(self.base_dir, '*.png')))
-        self.images.extend(glob.glob(os.path.join(self.base_dir, '*.jpeg')))
+        self.labels = {}
+        with open(os.path.join(self.scribble_dir, 'annotations.pkl'), 'rb') as f:
+            self.labels = pickle.load(f)
 
-        self.images = natsorted(self.images)
+        self.images = list(self.labels.keys())
         if self.split=='train':
             self.images = self.images[:int(0.9*len(self.images))]
         elif self.split=='val':
@@ -49,37 +49,23 @@ class FoldSegmentation(Dataset):
         else:
             raise ValueError("Only 'train' and 'val' are currently implemented as splits.")
 
-        self.fg_labels = {}
-        with open(os.path.join(self.scribble_dir, 'folds.pkl'), 'rb') as f:
-            self.fg_labels = pickle.load(f)
-        
-        self.bg_labels = {}
-        with open(os.path.join(self.scribble_dir, 'backgrounds.pkl'), 'rb') as f:
-            self.bg_labels = pickle.load(f)
-        
-        # print(len(self.images))
-        # print(len(self.labels.keys()))
-        # assert len(self.images) <= len(self.labels.keys())
-        
     def __len__(self):
         return len(self.images)
     
     def __getitem__(self, index):
         im_name = self.images[index]
         im = Image.open(im_name)
-        im_labels = self.fg_labels[im_name] if im_name in self.fg_labels else []
+        fg_labels, bg_labels = self.labels[im_name]
         labels = np.ones((432, 540, 3))*255
-        for l in im_labels:
+        for l in fg_labels:
             if len(l) > 0:
                 cv2.polylines(labels, np.array([l]), False, (1, 0, 0), 5)
+        for l in bg_labels:
+            if len(l) > 0:
+                cv2.polylines(labels, np.array([l]), False, (0, 0, 0), 5)
 
         labels = cv2.resize(labels, im.size)
         labels[labels>1] = 255
-
-        im_labels = self.bg_labels[im_name] if im_name in self.bg_labels else []
-        for l in im_labels:
-            if len(l) > 0:
-                cv2.polylines(labels, np.array([l]), False, (0, 0, 0), 2)
         labels = labels[:,:,0].astype(np.uint8)
 
         sample = {'image':im, 'label':Image.fromarray(labels)}
