@@ -5,6 +5,7 @@ from math import ceil
 import os
 import numpy as np
 from tqdm import tqdm
+from yaml import parse
 
 from data import make_data_loader
 
@@ -65,11 +66,17 @@ class Trainer(object):
         self.criterion = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(mode=args.loss_type)
         self.model, self.optimizer = model, optimizer
         
-        if args.densecrfloss >0:
-            self.densecrflosslayer = DenseCRFLoss(weight=args.densecrfloss, sigma_rgb=args.sigma_rgb, sigma_xy=args.sigma_xy, scale_factor=args.rloss_scale)
-            self.nclayer = NormalizedCutLoss(weight=args.densecrfloss, sigma_rgb=15., sigma_xy=40., scale_factor=args.rloss_scale)
-            print(self.densecrflosslayer)
-            print(self.nclayer)
+        self.reg_losses = {}
+
+        if args.densecrfloss > 0:
+            densecrflosslayer = DenseCRFLoss(weight=args.densecrfloss, sigma_rgb=args.sigma_rgb_crf, sigma_xy=args.sigma_xy_crf, scale_factor=args.rloss_scale)
+            print(densecrflosslayer)
+            self.reg_losses['dense_crf_loss'] = densecrflosslayer
+
+        if args.ncloss > 0:
+            nclayer = NormalizedCutLoss(weight=args.ncloss, sigma_rgb=args.sigma_rgb_nc, sigma_xy=args.sigma_xy_nc, scale_factor=args.rloss_scale)
+            print(nclayer)
+            self.reg_losses['norm_cut_loss'] = nclayer
         
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
@@ -107,11 +114,9 @@ class Trainer(object):
     def training(self, epoch):
         train_loss = 0.0
         train_celoss = 0.0
-        train_crfloss = 0.0
-        train_ncloss = 0.0
         self.model.train()
         tbar = tqdm(self.train_loader)
-        num_batch_tr = len(self.train_loader) // self.args.batch_size
+        num_batch_tr = len(self.train_loader)
         softmax = nn.Softmax(dim=1)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
@@ -126,34 +131,34 @@ class Trainer(object):
             output = self.model(image)
             
             celoss = self.criterion(output, target)
-            
-            if self.args.densecrfloss ==0:
-                loss = celoss
-            else:
+            loss = celoss
+            reg_lossvals = {}
+
+            if self.args.densecrfloss>0 or self.args.ncloss>0:
                 probs = softmax(output)
                 denormalized_image = denormalizeimage(sample['image'], mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-                densecrfloss = self.densecrflosslayer(denormalized_image,probs,croppings)
-                normcutloss = self.nclayer(denormalized_image, probs, croppings)
-                if self.args.cuda:
-                    densecrfloss = densecrfloss.cuda()
-                    normcutloss = normcutloss.cuda()
-                loss = celoss + densecrfloss + normcutloss
-                train_crfloss += densecrfloss.item()
-                train_ncloss += normcutloss.item()
+                for ls in self.reg_losses:
+                    lv = self.reg_losses[ls](denormalized_image, probs, croppings)
+                    if self.args.cuda:
+                        lv = lv.cuda()
+                    loss = loss + lv
+                    reg_lossvals[ls] = lv.item()
+
             loss.backward()
         
             self.optimizer.step()
             train_loss += loss.item()
             train_celoss += celoss.item()
 
-            self.total_iters += len(sample)
+            self.total_iters += len(image)
             
             tbar.set_description('Train loss: %.3f CE loss %.3f' 
                              % (train_loss / (i + 1),train_celoss / (i + 1)))
+            
             self.writer.add_scalar('train/total_loss_iter', loss.item(), self.total_iters)
-            self.writer.add_scalar('train/ce_loss', train_celoss, self.total_iters)
-            self.writer.add_scalar('train/crf_loss', train_crfloss, self.total_iters)
-            self.writer.add_scalar('train/nc_loss', train_ncloss, self.total_iters)
+            self.writer.add_scalar('train/ce_loss', celoss.item(), self.total_iters)
+            for l in reg_lossvals:
+                self.writer.add_scalar(f'train/{l}', reg_lossvals[l], self.total_iters)
 
             # Show 10 * 3 inference results each epoch
             if i % (num_batch_tr // 10) == 0:
@@ -208,7 +213,7 @@ class Trainer(object):
         self.writer.add_scalar('val/Acc_class', Acc_class, epoch)
         self.writer.add_scalar('val/fwIoU', FWIoU, epoch)
         print('Validation:')
-        print('[Epoch: %d, numImages: %5d]' % (epoch, len(self.val_loader)))
+        print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
         print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
         print('Loss: %.3f' % test_loss)
 
@@ -303,12 +308,16 @@ def main():
     # rloss options
     parser.add_argument('--densecrfloss', type=float, default=0,
                         metavar='M', help='densecrf loss (default: 0)')
+    parser.add_argument('--ncloss', type=float, default=0,
+                        metavar='NC', help='normalized cut loss (default: 0)')
     parser.add_argument('--rloss-scale',type=float,default=1.0,
                         help='scale factor for rloss input, choose small number for efficiency, domain: (0,1]')
-    parser.add_argument('--sigma-rgb',type=float,default=15.0,
+    parser.add_argument('--sigma-rgb-crf',type=float,default=15.0,
                         help='DenseCRF sigma_rgb')
-    parser.add_argument('--sigma-xy',type=float,default=80.0,
+    parser.add_argument('--sigma-xy-crf',type=float,default=80.0,
                         help='DenseCRF sigma_xy')
+    parser.add_argument('--sigma-rgb-nc', type=float, default=15.0)
+    parser.add_argument('--sigma-xy-nc',  type=float, default=40.0)
     
 
     args = parser.parse_args()
@@ -365,4 +374,5 @@ def main():
     trainer.writer.close()
 
 if __name__ == "__main__":
-   main()
+#    main()
+    pass
