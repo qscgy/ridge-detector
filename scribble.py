@@ -141,5 +141,5 @@ class ScribbleAnnotator:
         print(f'Total images with annotations: {len(self.annotations.keys())}')
 
 if __name__=='__main__':
-    scr = ScribbleAnnotator(False)
+    scr = ScribbleAnnotator(True)
     scr.mainloop()

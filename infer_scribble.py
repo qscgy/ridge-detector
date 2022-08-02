@@ -4,26 +4,56 @@ import argparse
 import os
 import numpy as np
 from tqdm import tqdm
-from PIL import Image
+from PIL import Image, ImageFilter
 import matplotlib.pyplot as plt
 from torchvision import transforms
+from torchvision.utils import make_grid
+from torchvision.datasets import ImageFolder
 from torch.autograd import Variable
 from os.path import join, isdir
 
-from mypath import Path
-from dataloaders import make_data_loader
-from dataloaders.custom_transforms import denormalizeimage
-from dataloaders.utils import decode_segmap
-from dataloaders import custom_transforms as tr
-from modeling.sync_batchnorm.replicate import patch_replication_callback
-from modeling.deeplab import *
-from utils.saver import Saver
+from rloss.pytorch.deeplabv3plus.mypath import Path
+from data import FoldSegmentation
+from torch.utils.data import DataLoader, Dataset
+from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
+from rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
+from rloss.pytorch.deeplabv3plus.modeling.deeplab import *
+from rloss.pytorch.deeplabv3plus.utils.saver import Saver
 import time
 import multiprocessing
+import glob
 
-from DenseCRFLoss import DenseCRFLoss
+from rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
+from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 
-global grad_seg 
+global grad_seg
+
+class ImageNormDataset(Dataset):
+    def __init__(self, root, crop_size):
+        super().__init__()
+        # self.images = glob.glob(os.path.join(root, '*.jpg'))[:25]
+        # print(self.images)
+        self.images = ['/playpen/Datasets/scribble-test/testA/011_frame014577.jpg', '/playpen/Datasets/scribble-test/testA/061_frame008798.jpg', '/playpen/Datasets/scribble-test/testA/030_frame021700.jpg', '/playpen/Datasets/scribble-test/testA/036_frame028843.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037529.jpg', '/playpen/Datasets/scribble-test/testA/015_frame017096.jpg', '/playpen/Datasets/scribble-test/testA/028_frame020968.jpg', '/playpen/Datasets/scribble-test/testA/047_frame013507.jpg', '/playpen/Datasets/scribble-test/testA/022_frame021904.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov12_13-56-23_001_frame024463.jpg', '/playpen/Datasets/scribble-test/testA/059_frame008342.jpg', '/playpen/Datasets/scribble-test/testA/066_frame016078.jpg', '/playpen/Datasets/scribble-test/testA/008_frame033659.jpg', '/playpen/Datasets/scribble-test/testA/007_frame014436.jpg', '/playpen/Datasets/scribble-test/testA/008_frame034035.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026291.jpg', '/playpen/Datasets/scribble-test/testA/011_frame014067.jpg', '/playpen/Datasets/scribble-test/testA/058_frame159460.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Oct18_13-33-20_002_frame033516.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Feb08_12-20-44_001_frame007594.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007386.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007252.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026260.jpg', '/playpen/Datasets/scribble-test/testA/005_frame053501.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037552.jpg']
+
+        self.transform = transforms.Compose([
+            transforms.Resize((crop_size, crop_size)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+        self.transform_unnorm = transforms.Compose([
+            transforms.Resize((crop_size, crop_size)),
+            transforms.ToTensor(),
+        ])
+    
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, index):
+        im_name = self.images[index]
+        im = Image.open(im_name)
+
+        return self.transform(im), self.transform_unnorm(im)
 
 def main():
 
@@ -53,21 +83,20 @@ def main():
                         help='DenseCRF sigma_rgb')
     parser.add_argument('--sigma-xy',type=float,default=80.0,
                         help='DenseCRF sigma_xy')
+    parser.add_argument('--batch-size', type=int, default=5)
     
     # output directory
     parser.add_argument('--output_directory', type=str,
                         help='output directory')
 
-    # input image
-    parser.add_argument('--image_path',type=str,default='./misc/test.png',
-                        help='input image path')
+    # input image directory
+    parser.add_argument('--base-dir', type=str, help='image directory')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     
     # Define Dataloader
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
-    print(args)
     
     # Define network
     model = DeepLab(num_classes=args.n_class,
@@ -96,78 +125,48 @@ def main():
           .format(args.checkpoint, checkpoint['epoch'], best_pred))
     
     model.eval()
-    
-    composed_transforms = transforms.Compose([
-            tr.FixScaleCropImage(crop_size=args.crop_size),
-            tr.NormalizeImage(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            tr.ToTensorImage()])
-    image = composed_transforms(Image.open(args.image_path).convert('RGB')).unsqueeze(0)
-    image_cpu = image
-    if not args.no_cuda:
-        image = image.cuda()
-    start = time.time()
-    output = model(image)
-    print('inference time:',time.time()-start)
-    pred = output.data.cpu().numpy()
-    pred = np.argmax(pred, axis=1)
+
+    kwargs = {'num_workers': args.workers, 'pin_memory': True}
+    test_data = ImageNormDataset(args.base_dir, crop_size=args.crop_size)
+    test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
+    segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
+    images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
+    softmax = nn.Softmax(dim=1)
+
+    for i, sample in enumerate(test_loader):
+        image, unnorm = sample
+        if not args.no_cuda:
+            image = image.cuda()
+        output = model(image)
+        probs = softmax(output)
+        segmentations[i] = probs[:,1].detach().cpu()
+        images[i] = unnorm.detach().cpu()
+
+    segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
+    images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
+    thresh = 0.5
+    pred = (segmentations > thresh)
 
     # visualize prediction
-    segmap = decode_segmap(pred[0],'pascal')*255
-    segmap = segmap.astype(np.uint8)
-    segimg = Image.fromarray(segmap, 'RGB')
-    if args.output_directory is not None:
-        if not isdir(args.output_directory):
-            os.makedirs(args.output_directory)
-        segimg.save(
-            join(args.output_directory, args.image_path.split('/')[-1].split('.')[0]+'_prediction.png')
-        )
-    else:
-        plt.figure()
-        plt.imshow(segimg)
-        plt.show()
-
-
-    # Add batch sample into evaluator
-    softmax = nn.Softmax(dim=1)
-    probs = softmax(output)
-    probs = Variable(probs, requires_grad=True)
-
-    if args.rloss_weight is not None:
-        croppings = torch.ones(pred.shape).float()
-        if not args.no_cuda:
-            croppings = croppings.cuda()
-        densecrflosslayer = DenseCRFLoss(weight=args.rloss_weight, sigma_rgb=args.sigma_rgb, sigma_xy=args.sigma_xy, scale_factor=args.rloss_scale)
-        if not args.no_cuda:
-            densecrflosslayer.cuda()
-        print(densecrflosslayer)
-
-        # resize output & image & croppings for densecrf
-        densecrfloss = densecrflosslayer(image_cpu, probs, croppings)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
+    plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
+    ax1.imshow(make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0))
+    ax1.set_title('Input frames')
+    ax1.axis('off')
     
-        print("densecrf loss {}".format(densecrfloss.item()))
+    images = images.transpose(1,0,2,3)
+    images[0][pred] = 0
+    images = images.transpose(1, 0, 2, 3)
+    grid = make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0)
+    ax2.imshow(grid)
+    ax2.set_title('Fold predictions in green')
 
-        # visualize densecrfloss
-        densecrfloss.backward()
-        #"""
-        grad_seg = probs.grad.cpu().numpy()
-        #print (grad_seg.shape)
-        #print (probs.grad.sum())
-        #print (reduced_probs.grad.sum())
-        #grad_seg = reduced_probs.grad.cpu().numpy()
-            # gradient of dense crf loss
-        for i in range(args.n_class):
-            fig=plt.figure()
-            plt.imshow(grad_seg[0,i,:,:], cmap="hot") #vmin=0, vmax=1)
-            plt.colorbar()
-            plt.axis('off')
-            if args.output_directory is not None:
-                plt.savefig(
-                    join(args.output_directory,args.image_path.split('/')[-1].split('.')[0]+'_grad_seg_class_' + str(i) +'.png')
-                )
-                plt.show(block=False)
-                plt.close(fig)
-        if args.output_directory is None:
-            plt.show(block=True)
+    # plt.figure()
+    # plt.imshow(probs[0,1].detach().cpu().numpy(), cmap='jet')
+    # plt.colorbar()
+    ax2.axis('off')
+    plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
+    plt.show()
         
 
 if __name__ == "__main__":

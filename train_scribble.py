@@ -8,6 +8,7 @@ from tqdm import tqdm
 from yaml import parse
 
 from data import make_data_loader
+from torchvision.utils import make_grid
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
 from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
@@ -134,6 +135,7 @@ class Trainer(object):
             loss = celoss
             reg_lossvals = {}
 
+            probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
                 probs = softmax(output)
                 denormalized_image = denormalizeimage(sample['image'], mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
@@ -163,6 +165,9 @@ class Trainer(object):
             # Show 10 * 3 inference results each epoch
             if i % (num_batch_tr // 10) == 0:
                 self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, self.total_iters)
+                if probs is not None:
+                    grid = make_grid(probs[:3,1].clone().cpu().unsqueeze(1).data, 3, normalize=False)
+                    self.writer.add_image('Fold_prob', grid, self.total_iters)
 
         self.writer.add_scalar('train/total_loss_epoch', train_loss, epoch)
         print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
@@ -374,5 +379,4 @@ def main():
     trainer.writer.close()
 
 if __name__ == "__main__":
-#    main()
-    pass
+   main()

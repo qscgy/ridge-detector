@@ -11,6 +11,15 @@ class TensorboardSummary(object):
     def create_summary(self):
         writer = SummaryWriter(log_dir=os.path.join(self.directory))
         return writer
+    
+    def visualize_prob(self, writer, dataset, probs, global_step):
+        import numpy as np
+        from matplotlib import cm
+        x = probs[:3,1].unsqueeze(1).cpu().numpy()
+        cmap = np.apply_along_axis(cm.jet, 0, x)
+        cmap = torch.from_numpy(cmap)
+        img = make_grid(cmap.data, 3, normalize=False)
+        writer.add_image('P(is fold region)', img, global_step)
 
     def visualize_image(self, writer, dataset, image, target, output, global_step):
         input_img = make_grid(image[:3].clone().cpu().data, 3, normalize=True)

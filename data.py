@@ -46,8 +46,10 @@ class FoldSegmentation(Dataset):
             self.images = self.images[:int(0.9*len(self.images))]
         elif self.split=='val':
             self.images = self.images[int(0.9*len(self.images)):]
+        elif self.split=='test':
+            pass    # base_dir should be the separate test folder
         else:
-            raise ValueError("Only 'train' and 'val' are currently implemented as splits.")
+            raise ValueError("Only 'train', 'val', and 'test' are currently implemented as splits.")
 
     def __len__(self):
         return len(self.images)
@@ -67,8 +69,11 @@ class FoldSegmentation(Dataset):
         labels = cv2.resize(labels, im.size)
         labels[labels>1] = 255
         labels = labels[:,:,0].astype(np.uint8)
-
-        sample = {'image':im, 'label':Image.fromarray(labels)}
+        
+        if self.split=='test':
+            sample = im
+        else:
+            sample = {'image':im, 'label':Image.fromarray(labels)}
 
         if self.split == "train":
             return self.transform_tr(sample)

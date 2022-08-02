@@ -44,19 +44,21 @@ class Saver(object):
     def save_experiment_config(self):
         logfile = os.path.join(self.experiment_dir, 'parameters.txt')
         log_file = open(logfile, 'w')
-        p = OrderedDict()
-        p['datset'] = self.args.dataset
-        p['backbone'] = self.args.backbone
-        p['out_stride'] = self.args.out_stride
-        p['lr'] = self.args.lr
-        p['lr_scheduler'] = self.args.lr_scheduler
-        p['loss_type'] = self.args.loss_type
-        p['epoch'] = self.args.epochs
-        p['base_size'] = self.args.base_size
-        p['crop_size'] = self.args.crop_size
-        p['densecrfloss'] = self.args.densecrfloss
-        p['ncloss'] = self.args.ncloss
+        # p = OrderedDict()
+        # p['datset'] = self.args.dataset
+        # p['backbone'] = self.args.backbone
+        # p['out_stride'] = self.args.out_stride
+        # p['lr'] = self.args.lr
+        # p['lr_scheduler'] = self.args.lr_scheduler
+        # p['loss_type'] = self.args.loss_type
+        # p['epoch'] = self.args.epochs
+        # p['base_size'] = self.args.base_size
+        # p['crop_size'] = self.args.crop_size
+        # p['densecrfloss'] = self.args.densecrfloss
+        # p['ncloss'] = self.args.ncloss
+        # p['sigma_rgb_crf'] = self.args.sigma_rgb_crf
+        p = vars(self.args)
 
-        for key, val in p.items():
-            log_file.write(key + ':' + str(val) + '\n')
+        for key in p:
+            log_file.write(key + ':' + str(p[key]) + '\n')
         log_file.close()
