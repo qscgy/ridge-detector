@@ -13,9 +13,9 @@ from torch.autograd import Variable
 from os.path import join, isdir
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
-from data import FoldSegmentation
+from data import FoldSegmentation, MEAN, STDEV
 from torch.utils.data import DataLoader, Dataset
-from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
+from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import NormalizeImage, denormalizeimage
 from rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
 from rloss.pytorch.deeplabv3plus.modeling.deeplab import *
 from rloss.pytorch.deeplabv3plus.utils.saver import Saver
@@ -28,7 +28,7 @@ from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 
 global grad_seg
 
-class ImageNormDataset(Dataset):
+class FixedImageDataset(Dataset):
     def __init__(self, root, crop_size):
         super().__init__()
         # self.images = glob.glob(os.path.join(root, '*.jpg'))[:25]
@@ -38,12 +38,7 @@ class ImageNormDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((crop_size, crop_size)),
             transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ])
-
-        self.transform_unnorm = transforms.Compose([
-            transforms.Resize((crop_size, crop_size)),
-            transforms.ToTensor(),
+            transforms.Normalize(MEAN, STDEV),
         ])
     
     def __len__(self):
@@ -53,7 +48,7 @@ class ImageNormDataset(Dataset):
         im_name = self.images[index]
         im = Image.open(im_name)
 
-        return self.transform(im), self.transform_unnorm(im)
+        return self.transform(im)
 
 def main():
 
@@ -127,20 +122,20 @@ def main():
     model.eval()
 
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
-    test_data = ImageNormDataset(args.base_dir, crop_size=args.crop_size)
+    test_data = FixedImageDataset(args.base_dir, crop_size=args.crop_size)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
     softmax = nn.Softmax(dim=1)
 
-    for i, sample in enumerate(test_loader):
-        image, unnorm = sample
+    for i, image in enumerate(test_loader):
         if not args.no_cuda:
             image = image.cuda()
         output = model(image)
         probs = softmax(output)
         segmentations[i] = probs[:,1].detach().cpu()
-        images[i] = unnorm.detach().cpu()
+        # images[i] = unnorm.detach().cpu()
+        images[i] = denormalizeimage(image, MEAN, STDEV)/255.0
 
     segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
     images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
@@ -150,7 +145,8 @@ def main():
     # visualize prediction
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
     plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
-    ax1.imshow(make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0))
+    grid = make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0)
+    ax1.imshow(grid)
     ax1.set_title('Input frames')
     ax1.axis('off')
     
@@ -161,13 +157,17 @@ def main():
     ax2.imshow(grid)
     ax2.set_title('Fold predictions in green')
 
-    # plt.figure()
-    # plt.imshow(probs[0,1].detach().cpu().numpy(), cmap='jet')
-    # plt.colorbar()
     ax2.axis('off')
     plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
+    
+    # plt.figure(FIGSIZE=(14, 7))
+    # plt.title(f'P(fold) for experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
+    # grid = segmentations
+    # plt.imshow(segmentations[0,1].detach().cpu().numpy(), cmap='jet')
+    # plt.colorbar()
+
     plt.show()
-        
+    
 
 if __name__ == "__main__":
    main()

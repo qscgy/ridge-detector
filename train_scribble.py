@@ -167,7 +167,7 @@ class Trainer(object):
                 self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, self.total_iters)
                 if probs is not None:
                     grid = make_grid(probs[:3,1].clone().cpu().unsqueeze(1).data, 3, normalize=False)
-                    self.writer.add_image('Fold_prob', grid, self.total_iters)
+                    # self.writer.add_image('Fold_prob', grid, self.total_iters)
 
         self.writer.add_scalar('train/total_loss_epoch', train_loss, epoch)
         print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
