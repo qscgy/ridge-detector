@@ -33,14 +33,14 @@ base_dir = '/playpen/Datasets/geodepth2'
 # copy_random_sample(all_images, 200)
 
 class ScribbleAnnotator:
-    def __init__(self, start_0=True):
+    def __init__(self, start_0=0):
         self.all_images = get_all_images(base_dir)[::5]
         print(f'Number of image files: {len(self.all_images)}')
         self.points = ([],[])
         self.drawing = False
         self.label = 0
         self.ix, self.iy = -1,-1
-        self.idx = 0
+        self.idx = start_0
 
         self.annotations = {}
         self.dump_file = 'annotations.pkl'
@@ -56,11 +56,11 @@ class ScribbleAnnotator:
         #         tmp_dc[k] = self.annotations[k]
         # self.annotations = tmp_dc
         
-        if start_0 or len(self.annotations.keys())==0:
-            pass
-        else:
-            ann_keys = natsorted(self.annotations.keys())
-            self.idx = self.all_images.index(ann_keys[-1])
+        # if start_0 or len(self.annotations.keys())==0:
+        #     pass
+        # else:
+        #     ann_keys = natsorted(self.annotations.keys())
+        #     self.idx = self.all_images.index(ann_keys[-1])
         self.load_img()
 
         self.load_points()

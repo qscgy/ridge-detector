@@ -15,8 +15,8 @@ MEAN = [0.485, 0.456, 0.406]
 STDEV = [0.229, 0.224, 0.225]
 
 def make_data_loader(*args, **kwargs):
-    train_set = FoldSegmentation(args, split='train', bstroke=15)
-    val_set = FoldSegmentation(args, split='val', bstroke=15)
+    train_set = FoldSegmentation(args, split='train')
+    val_set = FoldSegmentation(args, split='val')
     args = args[0]
 
     num_class = train_set.NUM_CLASSES

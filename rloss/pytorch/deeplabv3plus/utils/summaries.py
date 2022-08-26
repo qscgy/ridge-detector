@@ -30,5 +30,9 @@ class TensorboardSummary(object):
         gt_image = make_grid(decode_seg_map_sequence(torch.squeeze(target[:3], 1).detach().cpu().numpy(),
                                                        dataset=dataset), 3, normalize=False, range=(0, 255))
         writer.add_image('Groundtruth label', gt_image, global_step)
+
+        all_img = torch.cat((input_img, pred_map, gt_image), -2)
+        writer.add_image('All three', all_img, global_step)
+        
         # input_img[:,0] *= (1-torch.sign(pred_map[:,0]))
         # writer.add_image('Overlaid label', input_img, global_step)
