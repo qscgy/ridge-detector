@@ -65,7 +65,7 @@ class ProposalGenerator(nn.Module):
 
 if __name__=='__main__':
     scan_conv = ScanConversion2D()
-    img = Image.open('022_frame021781.jpg')
+    img = Image.open('seg.png')
     img = img.filter(ImageFilter.MedianFilter(size=3))
     transform = transforms.Compose([
         transforms.Grayscale(),

@@ -10,6 +10,8 @@ from yaml import parse
 from data import make_data_loader
 from torchvision.utils import make_grid
 
+from models.deepboundary import DeepBoundary
+
 from rloss.pytorch.deeplabv3plus.mypath import Path
 from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
 from rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
@@ -40,7 +42,7 @@ class Trainer(object):
         self.train_loader, self.val_loader, self.test_loader, self.nclass = make_data_loader(args, **kwargs)
 
         # Define network
-        model = DeepLab(num_classes=self.nclass,
+        model = DeepBoundary(num_classes=self.nclass,
                         backbone=args.backbone,
                         output_stride=args.out_stride,
                         sync_bn=args.sync_bn,
@@ -78,6 +80,9 @@ class Trainer(object):
             nclayer = NormalizedCutLoss(weight=args.ncloss, sigma_rgb=args.sigma_rgb_nc, sigma_xy=args.sigma_xy_nc, scale_factor=args.rloss_scale)
             print(nclayer)
             self.reg_losses['norm_cut_loss'] = nclayer
+        
+        # Cross-entropy loss between boundary regions and pixel prediction
+        self.boundary_loss = SegmentationLosses(weight=1., cuda=args.cuda).build_loss(mode='ce')
         
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
@@ -129,11 +134,15 @@ class Trainer(object):
                 image, target = image.cuda(), target.cuda()
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
-            output = self.model(image)
+            output, mask = self.model(image)
             
             celoss = self.criterion(output, target)
             loss = celoss
             reg_lossvals = {}
+
+            bloss = self.boundary_loss(output, mask)
+            loss = loss + bloss
+            reg_lossvals['boundary_loss'] = bloss.item()
 
             probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
@@ -197,7 +206,7 @@ class Trainer(object):
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
             with torch.no_grad():
-                output = self.model(image)
+                output, mask = self.model(image)
             loss = self.criterion(output, target)
             test_loss += loss.item()
             tbar.set_description('Test loss: %.3f' % (test_loss / (i + 1)))
