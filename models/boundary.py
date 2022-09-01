@@ -1,7 +1,44 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..util import plot_contour
+import numpy as np
+
+def plot_contour(a0, c0, a, b, c, d, outsize):
+    n = torch.arange(1,a.shape[-1]+1, device='cuda:0')
+    t = torch.arange(0,1,0.0001, device='cuda:0').reshape(-1,1)
+    sins = torch.sin(2*np.pi*n*t).T
+    coss = torch.cos(2*np.pi*n*t).T
+
+    X = a0 + torch.sum(a[...,None]*sins + b[...,None]*coss, axis=-2)
+    Y = c0 + torch.sum(c[...,None]*sins + d[...,None]*coss, axis=-2)
+    X = X.long()
+    Y = Y.long()
+
+    im = torch.zeros((*a.shape[:-1], *outsize), dtype=torch.float32, requires_grad=True)
+    im2 = im.clone()
+    for h in range (a.shape[-4]):
+        for i in range(a.shape[-3]):
+            for j in range(a.shape[-2]):
+                im2[h,i, j, Y[h,i,j], X[h,i,j]] = 1
+    mask = in_out(im2, a.shape[:-1]) * in_out(im2, a.shape[:-1], True)
+    mask = mask + in_out(im2.swapaxes(-2,-1), a.shape[:-1]).swapaxes(-2,-1) * in_out(im2.swapaxes(-2,-1), a.shape[:-1], True).swapaxes(-2,-1)
+    mask = mask.sum((1,2))>0
+
+
+    return mask
+
+def in_out(im, par_size, flip=False):
+    if flip:
+        im = torch.flip(im, (-2,))
+    mask = im.clone()
+    crossings = torch.zeros(*par_size, mask.shape[-1])
+    for i in range(1, mask.shape[-2]-1):
+        crossings += ((im[...,i,:]-im[...,i-1,:]) > 0)
+        mask[...,i,:] = (crossings%2==1)
+
+    if flip:
+        mask = torch.flip(mask, (-2,))
+    return mask
 
 class HeadBlock(nn.Module):
     def __init__(
@@ -68,14 +105,60 @@ class BoundaryBranch(nn.Module):
     def forward(self, x):
         locations = self.location_head(x)
         params = self.param_head(x)
+        print(locations.shape)
+        print(params.shape)
         
         mask = plot_contour(
-            locations[...,0], locations[...,1],
+            locations[:,0], locations[:,1],
             params[:self.order],
             params[self.order:self.order*2],
             params[self.order*2:self.order*3],
-            params[self.order*3],
+            params[self.order*3:],
             x.shape[-2:],
         )
 
         return mask
+
+def fill_fourier(z0, coeffs, dt):
+    order = coeffs.shape[-1]//4
+    a0 = z0[:,0]
+    c0 = z0[:,1]
+    a = coeffs[:,:order]
+    b = coeffs[:,order:order*2]
+    c = coeffs[:,order*2,order*3]
+    d = coeffs[:,order*3:]
+
+    n = torch.arange(1, a.shape[0]+1)
+    t = torch.arange(0,1+dt,dt).reshape(-1,1)
+    sins = torch.sin(2*np.pi*n*t).T
+    coss = torch.cos(2*np.pi*n*t).T
+
+    X = a0 + torch.sum(a*sins + b*coss, axis=-2)
+    Y = c0 + torch.sum(c*sins + d*coss, axis=-2)
+
+    # Derivatives
+    Xp = torch.sum(2*n[...,None]*np.pi*(a*coss - b*sins), axis=-2)
+    Yp = torch.sum(2*n[...,None]*np.pi*(c*coss - d*sins), axis=-2)
+
+    iY, iX = torch.meshgrid(torch.arange(50), torch.arange(50), indexing='ij')
+    iX.unsqueeze_(2)
+    iY.unsqueeze_(2)
+
+    print(Xp.shape)
+    print(iX.shape)
+    # Winding number computed using the Cauchy integral formula
+    index = torch.sum((Xp+1.j*Yp)/(X-iX+1.0j*(Y-iY))*dt, axis=-1)*1/(2*np.pi*1.j)
+
+    return (index > 0.9)
+
+if __name__=='__main__':
+    import matplotlib.pyplot as plt
+
+    dt = 0.01
+    z0 = torch.tensor([15,23]).reshape(1,-1,1,1)
+    coeffs = torch.tensor([0,0,5,10,20,5,0,0]).reshape(1,-1,1,1)
+    index = fill_fourier(z0, coeffs, dt)
+
+    plt.imshow((index.real.detach().numpy())>0.9)
+    plt.show()
+

@@ -136,6 +136,8 @@ class Trainer(object):
             self.optimizer.zero_grad()
             output, mask = self.model(image)
             
+            mask = mask*croppings
+            
             celoss = self.criterion(output, target)
             loss = celoss
             reg_lossvals = {}
