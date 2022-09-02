@@ -34,7 +34,9 @@ class DeepBoundary(nn.Module):
         x = self.decoder(x, low_level_feat)
         x = F.interpolate(x, size=input.size()[2:], mode='bilinear', align_corners=True)
 
-        mask = self.boundary_branch(x0)
+        mask = self.boundary_branch(x0).permute(2,0,1).unsqueeze(1)
+        mask = F.interpolate(mask, size=input.size()[2:], mode='bilinear', align_corners=True)
+        mask = torch.round(mask)    # interpolate may create fractional entries which make casting to bool unpredictable
 
         return x, mask
 

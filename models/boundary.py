@@ -101,22 +101,13 @@ class BoundaryBranch(nn.Module):
             norm=norm,
         )
         self.order = order
+        self.maxpool = nn.MaxPool2d(2, stride=2)
 
     def forward(self, x):
         locations = self.location_head(x)
         params = self.param_head(x)
-        print(locations.shape)
-        print(params.shape)
-        
-        # mask = plot_contour(
-        #     locations[:,0], locations[:,1],
-        #     params[:self.order],
-        #     params[self.order:self.order*2],
-        #     params[self.order*2:self.order*3],
-        #     params[self.order*3:],
-        #     x.shape[-2:],
-        # )
-
+        locations = self.maxpool(locations)
+        params = self.maxpool(params)
         mask = fill_fourier(locations, params, 0.01)
 
         return mask
@@ -125,43 +116,45 @@ def fill_fourier(z0, coeffs, dt):
     device = coeffs.device
     order = coeffs.shape[1]//4
     coeffs = coeffs.unsqueeze(1)
-    a0 = z0[:,0]
-    c0 = z0[:,1]
+    a0 = z0[:,None,0]
+    c0 = z0[:,None,1]
     a = coeffs[:,:,:order]
     b = coeffs[:,:,order:order*2]
     c = coeffs[:,:,order*2:order*3]
     d = coeffs[:,:,order*3:]
 
-    print(f'a shape: {a.shape}')
+    # print(f'a shape: {a.shape}')
+    # print(f'a0 shape: {a0.shape}')
     n = torch.arange(1, a.shape[-3]+1, device=device).reshape(1,-1)
     t = torch.arange(0,1+dt,dt, device=device).reshape(-1,1)
-    print(f'n shape: {n.shape}')
-    print(f't shape: {t.shape}')
+    # print(f'n shape: {n.shape}')
+    # print(f't shape: {t.shape}')
     sins = torch.sin(2*np.pi*n*t)[...,None,None]
     coss = torch.cos(2*np.pi*n*t)[...,None,None]
-    print(f'sins shape: {sins.shape}')
+    # print(f'sins shape: {sins.shape}')
 
     X = a0 + torch.sum(a*sins + b*coss, axis=-3)
     Y = c0 + torch.sum(c*sins + d*coss, axis=-3)
-    print(f'X shape: {X.shape}')
+    # print(f'X shape: {X.shape}')
 
     # Derivatives
     Xp = torch.sum(2*n[...,None,None]*np.pi*(a*coss - b*sins), axis=-3)
     Yp = torch.sum(2*n[...,None,None]*np.pi*(c*coss - d*sins), axis=-3)
-    print(f'Xp shape: {Xp.shape}')
+    # print(f'Xp shape: {Xp.shape}')
     # plt.plot(X[0,:,0,0].cpu(), Y[0,:,0,0].cpu())
     # plt.show()
 
     iY, iX = torch.meshgrid(torch.arange(50), torch.arange(50), indexing='ij')
     iX = iX[...,None,None,None,None].to(device)
     iY = iY[...,None,None,None,None].to(device)
-    print(f'iX shape: {iX.shape}')
+    # print(f'iX shape: {iX.shape}')
 
     # Winding number computed using the Cauchy integral formula
     index = torch.sum((Xp+1.j*Yp)/(X-iX+1.0j*(Y-iY))*dt, axis=-3)*1/(2*np.pi*1.j)
-    print(f'index shape: {index.shape}')
+    index = (index.real > 0.9).sum((-2,-1)).float()
+    # print(f'index shape: {index.shape}')
 
-    return (index.real > 0.9)
+    return index
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -171,6 +164,6 @@ if __name__=='__main__':
     coeffs = torch.tensor([0,0,5,10,20,5,0,0], device='cuda').reshape(1,-1,1,1).expand(4,8,3,3)
     index = fill_fourier(z0, coeffs, dt)
 
-    plt.imshow(index.abs().cpu().detach().numpy()[...,0,0,0])
+    plt.imshow(index.abs().cpu().detach().numpy()[...,0])
     plt.show()
 

@@ -6,6 +6,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from yaml import parse
+import matplotlib.pyplot as plt
 
 from data import make_data_loader
 from torchvision.utils import make_grid
@@ -82,7 +83,7 @@ class Trainer(object):
             self.reg_losses['norm_cut_loss'] = nclayer
         
         # Cross-entropy loss between boundary regions and pixel prediction
-        self.boundary_loss = SegmentationLosses(weight=1., cuda=args.cuda).build_loss(mode='ce')
+        self.boundary_loss = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(mode='ce')
         
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
@@ -136,15 +137,18 @@ class Trainer(object):
             self.optimizer.zero_grad()
             output, mask = self.model(image)
             
-            mask = mask*croppings
-            
+            # print(mask.shape)
+            mask = mask*croppings[:,None].cuda()
+            mask = mask[:,0].bool()
+            # print(mask.shape)
+
             celoss = self.criterion(output, target)
             loss = celoss
             reg_lossvals = {}
 
             bloss = self.boundary_loss(output, mask)
             loss = loss + bloss
-            reg_lossvals['boundary_loss'] = bloss.item()
+            # reg_lossvals['boundary_loss'] = bloss.item()
 
             probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
