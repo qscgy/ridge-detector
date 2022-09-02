@@ -119,46 +119,52 @@ class BoundaryBranch(nn.Module):
 
         return mask
 
-def fill_fourier(z0, coeffs, dt):
-    order = coeffs.shape[-1]//4
+def fill_fourier(z0, coeffs, dt, device='cpu'):
+    order = coeffs.shape[1]//4
     a0 = z0[:,0]
     c0 = z0[:,1]
     a = coeffs[:,:order]
     b = coeffs[:,order:order*2]
-    c = coeffs[:,order*2,order*3]
+    c = coeffs[:,order*2:order*3]
     d = coeffs[:,order*3:]
 
-    n = torch.arange(1, a.shape[0]+1)
-    t = torch.arange(0,1+dt,dt).reshape(-1,1)
-    sins = torch.sin(2*np.pi*n*t).T
-    coss = torch.cos(2*np.pi*n*t).T
+    # print(f'a shape: {a.shape}')
+    n = torch.arange(1, a.shape[1]+1, device=device).reshape(1,-1)
+    t = torch.arange(0,1+dt,dt, device=device).reshape(-1,1)
+    # print(f'n shape: {n.shape}')
+    # print(f't shape: {t.shape}')
+    sins = torch.sin(2*np.pi*n*t)[...,None,None]
+    coss = torch.cos(2*np.pi*n*t)[...,None,None]
+    # print(f'sins shape: {sins.shape}')
 
-    X = a0 + torch.sum(a*sins + b*coss, axis=-2)
-    Y = c0 + torch.sum(c*sins + d*coss, axis=-2)
+    X = a0 + torch.sum(a*sins + b*coss, axis=1)
+    Y = c0 + torch.sum(c*sins + d*coss, axis=1)
+    # print(f'X shape: {X.shape}')
 
     # Derivatives
-    Xp = torch.sum(2*n[...,None]*np.pi*(a*coss - b*sins), axis=-2)
-    Yp = torch.sum(2*n[...,None]*np.pi*(c*coss - d*sins), axis=-2)
+    Xp = torch.sum(2*n[...,None,None]*np.pi*(a*coss - b*sins), axis=1)
+    Yp = torch.sum(2*n[...,None,None]*np.pi*(c*coss - d*sins), axis=1)
+    # print(f'Xp shape: {Xp.shape}')
 
     iY, iX = torch.meshgrid(torch.arange(50), torch.arange(50), indexing='ij')
-    iX.unsqueeze_(2)
-    iY.unsqueeze_(2)
+    iX = iX[...,None, None,None].to(device)
+    iY = iY[...,None,None,None].to(device)
+    # print(f'iX shape: {iX.shape}')
 
-    print(Xp.shape)
-    print(iX.shape)
     # Winding number computed using the Cauchy integral formula
-    index = torch.sum((Xp+1.j*Yp)/(X-iX+1.0j*(Y-iY))*dt, axis=-1)*1/(2*np.pi*1.j)
+    index = torch.sum((Xp+1.j*Yp)/(X-iX+1.0j*(Y-iY))*dt, axis=2)*1/(2*np.pi*1.j)
+    # print(f'index shape: {index.shape}')
 
-    return (index > 0.9)
+    return (index.abs() > 0.9)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
 
     dt = 0.01
-    z0 = torch.tensor([15,23]).reshape(1,-1,1,1)
-    coeffs = torch.tensor([0,0,5,10,20,5,0,0]).reshape(1,-1,1,1)
-    index = fill_fourier(z0, coeffs, dt)
+    z0 = torch.tensor([15,30], device='cuda').reshape(1,-1,1,1)
+    coeffs = torch.tensor([0,0,5,10,20,5,0,0], device='cuda').reshape(1,-1,1,1).expand(1,8,3,3)
+    index = fill_fourier(z0, coeffs, dt, 'cuda')
 
-    plt.imshow((index.real.detach().numpy())>0.9)
+    plt.imshow(index.abs().cpu().detach().numpy()[...,0,0])
     plt.show()
 
