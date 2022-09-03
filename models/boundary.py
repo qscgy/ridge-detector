@@ -62,6 +62,7 @@ class HeadBlock(nn.Module):
         self.activation = activation()
         self.block = nn.Sequential(
             nn.Conv2d(in_chan, mid_chan, kernel_size=kernel, stride=stride, padding=padding),
+            nn.MaxPool2d(2, stride=2),
             norm(mid_chan),
             activation(),
             nn.Dropout2d(p=dropout) if dropout else nn.Identity(),
@@ -101,13 +102,10 @@ class BoundaryBranch(nn.Module):
             norm=norm,
         )
         self.order = order
-        self.maxpool = nn.MaxPool2d(2, stride=2)
 
     def forward(self, x):
         locations = self.location_head(x)
         params = self.param_head(x)
-        locations = self.maxpool(locations)
-        params = self.maxpool(params)
         mask = fill_fourier(locations, params, 0.01)
 
         return mask
@@ -144,7 +142,8 @@ def fill_fourier(z0, coeffs, dt):
     # plt.plot(X[0,:,0,0].cpu(), Y[0,:,0,0].cpu())
     # plt.show()
 
-    iY, iX = torch.meshgrid(torch.arange(50), torch.arange(50), indexing='ij')
+    coords = torch.linspace(-1, 1, 53)
+    iY, iX = torch.meshgrid(coords, coords, indexing='ij')
     iX = iX[...,None,None,None,None].to(device)
     iY = iY[...,None,None,None,None].to(device)
     # print(f'iX shape: {iX.shape}')
@@ -160,10 +159,10 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
 
     dt = 0.01
-    z0 = torch.tensor([15,30], device='cuda').reshape(1,-1,1,1)
-    coeffs = torch.tensor([0,0,5,10,20,5,0,0], device='cuda').reshape(1,-1,1,1).expand(4,8,3,3)
+    z0 = torch.tensor([0,0], device='cuda').reshape(1,-1,1,1)
+    coeffs = torch.tensor([0,0,.2,.4,.8,.2,0,0], device='cuda').reshape(1,-1,1,1).expand(4,8,3,3)
     index = fill_fourier(z0, coeffs, dt)
 
-    plt.imshow(index.abs().cpu().detach().numpy()[...,0])
+    plt.imshow(index.abs().cpu().detach().numpy()[...,0], extent=[-1,1,1,-1])
     plt.show()
 

@@ -21,18 +21,22 @@ class TensorboardSummary(object):
         img = make_grid(cmap.data, 3, normalize=False)
         writer.add_image('P(is fold region)', img, global_step)
 
-    def visualize_image(self, writer, dataset, image, target, output, global_step):
+    def visualize_image(self, writer, dataset, image, target, output, global_step, regions=None):
         input_img = make_grid(image[:3].clone().cpu().data, 3, normalize=True)
         writer.add_image('Image', input_img, global_step)
         pred_map = make_grid(decode_seg_map_sequence(torch.max(output[:3], 1)[1].detach().cpu().numpy(),
-                                                       dataset=dataset), 3, normalize=False, range=(0, 255))
+                                                       dataset=dataset), 3, normalize=False, value_range=(0, 255))
         writer.add_image('Predicted label', pred_map, global_step)
         gt_image = make_grid(decode_seg_map_sequence(torch.squeeze(target[:3], 1).detach().cpu().numpy(),
-                                                       dataset=dataset), 3, normalize=False, range=(0, 255))
+                                                       dataset=dataset), 3, normalize=False, value_range=(0, 255))
         writer.add_image('Groundtruth label', gt_image, global_step)
 
-        all_img = torch.cat((input_img, pred_map, gt_image), -2)
-        writer.add_image('All three', all_img, global_step)
+        if regions is not None:
+            region_image = make_grid(regions[:3,None].detach().cpu().data, 3, scale_each=True, value_range=(0,1))
+            all_img = torch.cat((input_img, pred_map, region_image, gt_image), -2)
+        else:
+            all_img = torch.cat((input_img, pred_map, gt_image), -2)
+        writer.add_image('All', all_img, global_step)
         
         # input_img[:,0] *= (1-torch.sign(pred_map[:,0]))
         # writer.add_image('Overlaid label', input_img, global_step)

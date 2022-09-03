@@ -11,6 +11,7 @@ from torchvision.utils import make_grid
 from torchvision.datasets import ImageFolder
 from torch.autograd import Variable
 from os.path import join, isdir
+from models.deepboundary import DeepBoundary
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
 from data import FoldSegmentation, MEAN, STDEV
@@ -94,7 +95,7 @@ def main():
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
     
     # Define network
-    model = DeepLab(num_classes=args.n_class,
+    model = DeepBoundary(num_classes=args.n_class,
                     backbone=args.backbone,
                     output_stride=16,
                     sync_bn=False,
@@ -125,17 +126,19 @@ def main():
     test_data = FixedImageDataset(args.base_dir, crop_size=args.crop_size)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
+    regions = torch.zeros(segmentations.shape)
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
     softmax = nn.Softmax(dim=1)
 
     for i, image in enumerate(test_loader):
         if not args.no_cuda:
             image = image.cuda()
-        output = model(image)
+        output, mask = model(image)
         probs = softmax(output)
         segmentations[i] = probs[:,1].detach().cpu()
         # images[i] = unnorm.detach().cpu()
         images[i] = denormalizeimage(image, MEAN, STDEV)/255.0
+        regions[i] = mask.squeeze().detach().cpu()
 
     segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
     images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
@@ -143,21 +146,29 @@ def main():
     pred = (segmentations > thresh)
 
     # visualize prediction
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
+    fig, ax = plt.subplots(2, 2, figsize=(14, 14))
     plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
     grid = make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0)
-    ax1.imshow(grid)
-    ax1.set_title('Input frames')
-    ax1.axis('off')
+    ax[0][0].imshow(grid)
+    ax[0][0].set_title('Input frames')
+    ax[0][0].axis('off')
     
     images = images.transpose(1,0,2,3)
     images[0][pred] = 0
     images = images.transpose(1, 0, 2, 3)
     grid = make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0)
-    ax2.imshow(grid)
-    ax2.set_title('Fold predictions in green')
+    ax[0][1].imshow(grid)
+    ax[0][1].set_title('Fold predictions in green')
+    ax[0][1].axis('off')
 
-    ax2.axis('off')
+    regions = regions.reshape(-1, 1, args.crop_size, args.crop_size)
+    print(regions.min(), regions.max())
+    grid = make_grid(regions, int(np.sqrt(regions.shape[0])), scale_each=True).numpy().transpose(1,2,0)
+    print(grid.dtype)
+    ax[1][0].imshow(grid)
+    ax[1][0].set_title('Region masks')
+    ax[1][0].axis('off')
+
     plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
     
     # plt.figure(FIGSIZE=(14, 7))

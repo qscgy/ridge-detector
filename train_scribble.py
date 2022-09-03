@@ -146,9 +146,9 @@ class Trainer(object):
             loss = celoss
             reg_lossvals = {}
 
-            bloss = self.boundary_loss(output, mask)
+            bloss = self.boundary_loss(output, mask)*self.args.bd_loss
             loss = loss + bloss
-            # reg_lossvals['boundary_loss'] = bloss.item()
+            reg_lossvals['boundary_loss'] = bloss.item()
 
             probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
@@ -179,7 +179,13 @@ class Trainer(object):
 
             # Show 10 * 3 inference results each epoch
             if i % (num_batch_tr // 10) == 0:
-                self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, self.total_iters)
+                self.summary.visualize_image(
+                    self.writer, 
+                    self.args.dataset, 
+                    image, target, output, 
+                    self.total_iters,
+                    regions=mask if self.args.bd_loss>0 else None,
+                    )
                 if probs is not None:
                     grid = make_grid(probs[:3,1].clone().cpu().unsqueeze(1).data, 3, normalize=False)
                     # self.writer.add_image('Fold_prob', grid, self.total_iters)
@@ -338,7 +344,8 @@ def main():
                         help='DenseCRF sigma_xy')
     parser.add_argument('--sigma-rgb-nc', type=float, default=15.0)
     parser.add_argument('--sigma-xy-nc',  type=float, default=40.0)
-    
+
+    parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
 
     args = parser.parse_args()
     
