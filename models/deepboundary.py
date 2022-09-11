@@ -23,18 +23,18 @@ class DeepBoundary(nn.Module):
         self.backbone = build_backbone(backbone, output_stride, BatchNorm)
         self.aspp = build_aspp(backbone, output_stride, BatchNorm)
         self.decoder = build_decoder(num_classes, backbone, BatchNorm)
-        self.boundary_branch = BoundaryBranch(320, order=3, stride=1, norm=BatchNorm)
+        self.boundary_branch = BoundaryBranch(256, order=3, stride=1, norm=BatchNorm)
 
         if freeze_bn:
             self.freeze_bn()
 
     def forward(self, input):
         x0, low_level_feat = self.backbone(input)
-        x = self.aspp(x0)
-        x = self.decoder(x, low_level_feat)
+        x1 = self.aspp(x0)
+        x = self.decoder(x1, low_level_feat)
         x = F.interpolate(x, size=input.size()[2:], mode='bilinear', align_corners=True)
 
-        mask = self.boundary_branch(x0).permute(2,0,1).unsqueeze(1)
+        mask = self.boundary_branch(x1).permute(2,0,1).unsqueeze(1)
         mask = F.interpolate(mask, size=input.size()[2:], mode='bilinear', align_corners=True)
         mask = torch.round(mask)    # interpolate may create fractional entries which make casting to bool unpredictable
 

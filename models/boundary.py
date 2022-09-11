@@ -61,12 +61,13 @@ class HeadBlock(nn.Module):
 
         self.activation = activation()
         self.block = nn.Sequential(
-            nn.Conv2d(in_chan, mid_chan, kernel_size=kernel, stride=stride, padding=padding),
+            nn.Conv2d(in_chan, mid_chan, kernel_size=kernel, stride=stride, padding=0),
             nn.MaxPool2d(2, stride=2),
             norm(mid_chan),
             activation(),
             nn.Dropout2d(p=dropout) if dropout else nn.Identity(),
-            nn.Conv2d(mid_chan, out_chan, 1)
+            nn.Conv2d(mid_chan, out_chan, 1),
+            nn.MaxPool2d(2, stride=2),
         )
     
     def forward(self, x):
@@ -94,7 +95,7 @@ class BoundaryBranch(nn.Module):
         )
         self.param_head = HeadBlock(
             backbone_out_chan,
-            order * 4,
+            4,
             mid_chan=backbone_out_chan,
             kernel=7,
             padding=3,
@@ -106,7 +107,8 @@ class BoundaryBranch(nn.Module):
     def forward(self, x):
         locations = self.location_head(x)
         params = self.param_head(x)
-        mask = fill_fourier(locations, params, 0.01)
+        # mask = fill_fourier(locations, params, 0.01)
+        mask = fill_arc(locations, params)
 
         return mask
 
@@ -150,19 +152,71 @@ def fill_fourier(z0, coeffs, dt):
 
     # Winding number computed using the Cauchy integral formula
     index = torch.sum((Xp+1.j*Yp)/(X-iX+1.0j*(Y-iY))*dt, axis=-3)*1/(2*np.pi*1.j)
-    index = (index.real > 0.9).sum((-2,-1)).float()
+    index = (index.real.abs() > 0.9).float()
+    # index = index.real
     # print(f'index shape: {index.shape}')
 
-    return index
+    return index, X, Y
+
+def fill_arc(center, params, device='cuda'):
+    # theta >= 0 or this may not work
+    R1 = params[:,0].unsqueeze(1)
+    R2 = params[:,1].unsqueeze(1)
+    t1 = params[:,2].unsqueeze(1)
+    t2 = params[:,3].unsqueeze(1)
+    ii = torch.linspace(-1,1,53, device=device)
+    ix, iy = torch.meshgrid(ii, ii, indexing='xy')
+    iy = torch.flipud(iy)
+    ix = ix.reshape(*ix.shape,1,1,1,1)
+    iy = iy.reshape(*iy.shape,1,1,1,1)
+    ix = ix + center[:,0].unsqueeze(1)
+    iy = iy + center[:,1].unsqueeze(1)
+    rs = torch.sqrt(ix**2 + iy**2)
+    thetas = torch.atan2(iy, ix)
+    thetas = (thetas-t1)%(2*np.pi)
+    mask = (thetas<=t2)
+    dist = (R1-rs).abs()
+    dist[~mask] = min_dist(ix, iy, R1, t1, t2)[~mask]
+    dist = (dist<=R2)
+    dist.squeeze_()
+    dist_all = (torch.sum(dist, axis=(-1, -2))>=1).float()
+
+    return dist_all
+
+def min_dist(ix, iy, R1, t1, t2):
+    x1 = R1*torch.cos(t1)
+    y1 = R1*torch.sin(t1)
+    x2 = R1*torch.cos(t1+t2)
+    y2 = R1*torch.sin(t1+t2)
+    return torch.minimum(torch.sqrt((ix-x1)**2 + (iy-y1)**2), torch.sqrt((ix-x2)**2 + (iy-y2)**2))
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
+    from matplotlib import patches
 
     dt = 0.01
     z0 = torch.tensor([0,0], device='cuda').reshape(1,-1,1,1)
-    coeffs = torch.tensor([0,0,.2,.4,.8,.2,0,0], device='cuda').reshape(1,-1,1,1).expand(4,8,3,3)
-    index = fill_fourier(z0, coeffs, dt)
+    coeffs = torch.randn(4,8,3,3, device='cuda')/4
+    # index, xs, ys = fill_fourier(z0, coeffs, dt)
 
-    plt.imshow(index.abs().cpu().detach().numpy()[...,0], extent=[-1,1,1,-1])
+    # center = torch.rand(4,2,3,3).abs().cuda()*2-1
+    center = torch.rand(4,2,3,3).cuda()
+    R1 = torch.rand(4,1,3,3).cuda()
+    R2 = torch.rand(4,1,3,3).abs().cuda()/5
+    theta = torch.rand(4,2,3,3).cuda()*np.pi
+    params = torch.cat((R1, R2, theta), 1)
+    mask = fill_arc(center, params)
+    print(mask.shape)
+    
+    fig, ax = plt.subplots(3, 3, figsize=(12,12))
+    for i in range(3):
+        for j in range(3):
+            # ax[i][j].imshow(index[:,:,0].cpu().detach().numpy()[...,i,j], extent=[-1,1,-1,1])
+            ax[i][j].imshow(mask[:,:,0].cpu().detach().numpy(), extent=[-1,1,-1,1])
+            ax[i][j].set_xlim(-1,1)
+            ax[i][j].set_ylim(-1,1)
+            arc = patches.Arc((0,0), 2, 2, 0, theta[0,0,i,j].cpu().numpy()*180/np.pi, (theta[0,0,i,j]+theta[0,1,i,j]).cpu().numpy()*180/np.pi, linewidth=5)
+            ax[i][j].add_patch(arc)
+            # ax[i][j].plot(xs[0,:,i,j].cpu().detach().numpy(), ys[0,:,i,j].cpu().detach().numpy())
     plt.show()
 

@@ -140,7 +140,6 @@ class Trainer(object):
             # print(mask.shape)
             mask = mask*croppings[:,None].cuda()
             mask = mask[:,0].bool()
-            # print(mask.shape)
 
             celoss = self.criterion(output, target)
             loss = celoss
