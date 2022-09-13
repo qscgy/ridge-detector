@@ -5,6 +5,13 @@ from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 from rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
 from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import denormalizeimage
 
+def pixel_matching_loss(mask, target):
+    loss = (mask != target) & (target < 254)
+    return loss.sum((1,2)).float().mean()/torch.count_nonzero(target<254)
+
+def improved_arc_loss(output, locs, params):
+    pass
+
 if __name__=='__main__':
     criterion = NormalizedCutLoss(1, 15., 40., 1.)
     N, K, H, W = 10, 2, 50, 50

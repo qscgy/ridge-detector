@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from data import make_data_loader
 from torchvision.utils import make_grid
 
+from losses import pixel_matching_loss
 from models.deepboundary import DeepBoundary
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
@@ -135,9 +136,8 @@ class Trainer(object):
                 image, target = image.cuda(), target.cuda()
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
-            output, mask = self.model(image)
+            output, mask, params = self.model(image)
             
-            # print(mask.shape)
             mask = mask*croppings[:,None].cuda()
             mask = mask[:,0].bool()
 
@@ -145,9 +145,14 @@ class Trainer(object):
             loss = celoss
             reg_lossvals = {}
 
-            bloss = self.boundary_loss(output, mask)*self.args.bd_loss
+            bloss = (self.boundary_loss(output, mask))*self.args.bd_loss
+            # bloss = pixel_matching_loss(mask, target)*self.args.bd_loss
             loss = loss + bloss
             reg_lossvals['boundary_loss'] = bloss.item()
+
+            lt_loss = (params[:,1].abs().mean() + (params[:,3]-2*np.pi).abs().mean())*self.args.lt_loss
+            loss = loss + lt_loss
+            reg_lossvals['long_thin_loss'] = lt_loss.item()
 
             probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
@@ -217,7 +222,7 @@ class Trainer(object):
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
             with torch.no_grad():
-                output, mask = self.model(image)
+                output, mask, params = self.model(image)
             loss = self.criterion(output, target)
             test_loss += loss.item()
             tbar.set_description('Test loss: %.3f' % (test_loss / (i + 1)))
@@ -345,6 +350,7 @@ def main():
     parser.add_argument('--sigma-xy-nc',  type=float, default=40.0)
 
     parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
+    parser.add_argument('--lt-loss', type=float, default=0, help="'long and thin' loss weight")
 
     args = parser.parse_args()
     

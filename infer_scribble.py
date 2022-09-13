@@ -133,7 +133,7 @@ def main():
     for i, image in enumerate(test_loader):
         if not args.no_cuda:
             image = image.cuda()
-        output, mask = model(image)
+        output, mask, params = model(image)
         probs = softmax(output)
         segmentations[i] = probs[:,1].detach().cpu()
         # images[i] = unnorm.detach().cpu()

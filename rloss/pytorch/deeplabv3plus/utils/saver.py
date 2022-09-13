@@ -4,16 +4,23 @@ import torch
 from collections import OrderedDict
 import glob
 from natsort.natsort import natsorted
+from random import choice
 
 class Saver(object):
 
     def __init__(self, args):
         self.args = args
         self.directory = os.path.join('run', args.dataset, args.checkname)
-        self.runs = natsorted(glob.glob(os.path.join(self.directory, 'experiment_*')))
-        run_id = int(self.runs[-1].split('_')[-1]) + 1 if self.runs else 0
+        self.runs = natsorted(glob.glob(os.path.join(self.directory, 'ex_*_*')))
+        run_id = int(self.runs[-1].split('_')[-2]) + 1 if self.runs else 0
 
-        self.experiment_dir = os.path.join(self.directory, 'experiment_{}'.format(str(run_id)))
+        # Assign names to experiments so they're easier to keep track of, a la Docker containers
+        with open('names.txt', 'r') as f:
+            lines = f.readlines()
+            lines = [line.rstrip() for line in lines]
+        name = choice(lines)
+
+        self.experiment_dir = os.path.join(self.directory, 'ex_{}_{}'.format(str(run_id), name.lower()))
         if not os.path.exists(self.experiment_dir):
             os.makedirs(self.experiment_dir)
 

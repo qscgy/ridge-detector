@@ -23,6 +23,10 @@ class DeepBoundary(nn.Module):
         self.backbone = build_backbone(backbone, output_stride, BatchNorm)
         self.aspp = build_aspp(backbone, output_stride, BatchNorm)
         self.decoder = build_decoder(num_classes, backbone, BatchNorm)
+
+        # Decoupled ASPP and decoder for instance prediction, inspired by Panoptic-DeepLab
+        self.shape_aspp = build_aspp(backbone, output_stride, BatchNorm)
+        self.shape_decoder = build_decoder(num_classes, backbone, BatchNorm)
         self.boundary_branch = BoundaryBranch(256, order=3, stride=1, norm=BatchNorm)
 
         if freeze_bn:
@@ -34,11 +38,14 @@ class DeepBoundary(nn.Module):
         x = self.decoder(x1, low_level_feat)
         x = F.interpolate(x, size=input.size()[2:], mode='bilinear', align_corners=True)
 
-        mask = self.boundary_branch(x1).permute(2,0,1).unsqueeze(1)
+        s = self.shape_aspp(x0)
+        # s = self.shape_decoder(s, low_level_feat)
+        mask, params = self.boundary_branch(s)
+        mask = mask.permute(2,0,1).unsqueeze(1)
         mask = F.interpolate(mask, size=input.size()[2:], mode='bilinear', align_corners=True)
         mask = torch.round(mask)    # interpolate may create fractional entries which make casting to bool unpredictable
 
-        return x, mask
+        return x, mask, params
 
     def freeze_bn(self):
         for m in self.modules():

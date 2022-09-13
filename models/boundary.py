@@ -46,11 +46,11 @@ class HeadBlock(nn.Module):
         in_chan,
         out_chan,
         mid_chan=None,
-        kernel=3,
+        kernel=5,
         padding=1,
         activation=nn.ReLU,
         norm=nn.BatchNorm2d,
-        dropout=0.1,
+        dropout=0,
         stride=1
     ):
         super().__init__()
@@ -62,12 +62,13 @@ class HeadBlock(nn.Module):
         self.activation = activation()
         self.block = nn.Sequential(
             nn.Conv2d(in_chan, mid_chan, kernel_size=kernel, stride=stride, padding=0),
-            nn.MaxPool2d(2, stride=2),
+            # nn.MaxPool2d(2, stride=2),
             norm(mid_chan),
             activation(),
             nn.Dropout2d(p=dropout) if dropout else nn.Identity(),
-            nn.Conv2d(mid_chan, out_chan, 1),
-            nn.MaxPool2d(2, stride=2),
+            nn.Conv2d(mid_chan, out_chan, kernel_size=3, padding=0),
+            nn.AvgPool2d(2, stride=2),
+            # nn.MaxPool2d(2, stride=2),
         )
     
     def forward(self, x):
@@ -108,9 +109,9 @@ class BoundaryBranch(nn.Module):
         locations = self.location_head(x)
         params = self.param_head(x)
         # mask = fill_fourier(locations, params, 0.01)
-        mask = fill_arc(locations, params)
+        mask = fill_arc_v2(locations, params)
 
-        return mask
+        return mask, params
 
 def fill_fourier(z0, coeffs, dt):
     device = coeffs.device
@@ -183,6 +184,40 @@ def fill_arc(center, params, device='cuda'):
 
     return dist_all
 
+def fill_arc_v2(locs, params, device='cuda', outsize=216):
+    # locs is now the point halfway along the arc
+    R1 = params[:,0].unsqueeze(1)
+    R2 = params[:,1].unsqueeze(1)
+    alpha = params[:,2].unsqueeze(1)    # angle of unit tangent vector at center
+    theta = params[:,3].unsqueeze(1)
+
+    t1 = (alpha-np.pi/2-theta)%(2*np.pi)
+    t2 = (2*theta)%(2*np.pi)
+    print(theta[0,0,0,0]/np.pi)
+
+    center = locs.clone()
+    center[:,0] = (locs[:,0]-R1*torch.cos(alpha-np.pi/2))[:,0]
+    center[:,1] = (locs[:,1]-R1*torch.sin(alpha-np.pi/2))[:,0]
+
+    ii = torch.linspace(-1,1,outsize,device=device)
+    ix, iy = torch.meshgrid(ii, ii, indexing='xy')
+    iy = torch.flipud(iy)
+    ix = ix.reshape(*ix.shape,1,1,1,1)
+    iy = iy.reshape(*iy.shape,1,1,1,1)
+    ix = ix - center[:,0].unsqueeze(1)
+    iy = iy - center[:,1].unsqueeze(1)
+    rs = torch.sqrt(ix**2 + iy**2)
+    thetas = torch.atan2(iy, ix)
+    thetas = (thetas-t1)%(2*np.pi)
+    mask = (thetas<=t2)
+    dist = (R1-rs).abs()
+    dist[~mask] = min_dist(ix, iy, R1, t1, t2)[~mask]
+    dist = (dist<=R2)
+    dist.squeeze_()
+    dist_all = (torch.sum(dist, axis=(-1, -2))>=1).float()
+
+    return dist_all
+
 def min_dist(ix, iy, R1, t1, t2):
     x1 = R1*torch.cos(t1)
     y1 = R1*torch.sin(t1)
@@ -199,24 +234,26 @@ if __name__=='__main__':
     coeffs = torch.randn(4,8,3,3, device='cuda')/4
     # index, xs, ys = fill_fourier(z0, coeffs, dt)
 
-    # center = torch.rand(4,2,3,3).abs().cuda()*2-1
-    center = torch.rand(4,2,3,3).cuda()
+    center = torch.rand(4,2,3,3).abs().cuda()*1.4-0.7
+    # center = torch.zeros(4,2,3,3).cuda()
     R1 = torch.rand(4,1,3,3).cuda()
-    R2 = torch.rand(4,1,3,3).abs().cuda()/5
-    theta = torch.rand(4,2,3,3).cuda()*np.pi
-    params = torch.cat((R1, R2, theta), 1)
-    mask = fill_arc(center, params)
+    R2 = torch.rand(4,1,3,3).abs().cuda()*0.1
+    alpha = torch.rand(4,1,3,3).cuda()*np.pi*2
+    theta = torch.rand(4,1,3,3).cuda()*np.pi
+    params = torch.cat((R1, R2, alpha, theta), 1)
+    mask = fill_arc_v2(center, params)
     print(mask.shape)
     
-    fig, ax = plt.subplots(3, 3, figsize=(12,12))
-    for i in range(3):
-        for j in range(3):
+    fig, ax = plt.subplots(1,1,figsize=(7,7))
+    # for i in range(3):
+    #     for j in range(3):
             # ax[i][j].imshow(index[:,:,0].cpu().detach().numpy()[...,i,j], extent=[-1,1,-1,1])
-            ax[i][j].imshow(mask[:,:,0].cpu().detach().numpy(), extent=[-1,1,-1,1])
-            ax[i][j].set_xlim(-1,1)
-            ax[i][j].set_ylim(-1,1)
-            arc = patches.Arc((0,0), 2, 2, 0, theta[0,0,i,j].cpu().numpy()*180/np.pi, (theta[0,0,i,j]+theta[0,1,i,j]).cpu().numpy()*180/np.pi, linewidth=5)
-            ax[i][j].add_patch(arc)
+    ax.imshow(mask[:,:,0].cpu().detach().numpy(), extent=[-1,1,-1,1])
+    ax.set_xlim(-1,1)
+    ax.set_ylim(-1,1)
+    ax.scatter(*center[0].detach().cpu().reshape(2,9))
+    # arc = patches.Arc((0,0), 2, 2, 0, theta[0,0,i,j].cpu().numpy()*180/np.pi, (theta[0,0,i,j]+theta[0,1,i,j]).cpu().numpy()*180/np.pi, linewidth=5)
+            # ax[i][j].add_patch(arc)
             # ax[i][j].plot(xs[0,:,i,j].cpu().detach().numpy(), ys[0,:,i,j].cpu().detach().numpy())
     plt.show()
 

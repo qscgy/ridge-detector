@@ -32,7 +32,10 @@ class TensorboardSummary(object):
         writer.add_image('Groundtruth label', gt_image, global_step)
 
         if regions is not None:
-            region_image = make_grid(regions[:3,None].detach().cpu().data, 3, scale_each=True, value_range=(0,1))
+            if regions.dim()==3:
+                region_image = make_grid(regions[:3,None].detach().cpu().data, 3, scale_each=True, value_range=(0,1))
+            else:
+                region_image = make_grid(regions[:3].detach().cpu().data, 3, scale_each=True, value_range=(0,1))
             all_img = torch.cat((input_img, pred_map, region_image, gt_image), -2)
         else:
             all_img = torch.cat((input_img, pred_map, gt_image), -2)
