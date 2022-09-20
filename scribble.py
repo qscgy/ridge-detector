@@ -11,11 +11,13 @@ import shutil
 import sys
 
 def get_all_images(base_dir):
-    im_dirs = os.listdir(base_dir)
-    im_dirs = natsorted(im_dirs)
+    # im_dirs = os.listdir(base_dir)
+    # im_dirs = natsorted(im_dirs)
+    im_dirs = ['']
     images = []
     for d in im_dirs:
-        path = os.path.join(base_dir, d, 'img_corr')
+        # path = os.path.join(base_dir, d, 'img_corr')
+        path = base_dir
         if os.path.isdir(path):
             images.extend(natsorted([os.path.join(path, i) for i in os.listdir(path)]))
     return images
@@ -27,23 +29,23 @@ def copy_random_sample(files, dst, n=200):
         im_dir = im.split('/')[-3]
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
-base_dir = '/playpen/Datasets/geodepth2'
+base_dir = '/playpen/Datasets/test-set'
 
 # all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 # copy_random_sample(all_images, 200)
 
 class ScribbleAnnotator:
-    def __init__(self, start_0=0):
-        self.all_images = get_all_images(base_dir)[::5]
+    def __init__(self, start=0):
+        self.all_images = get_all_images(base_dir)
         print(f'Number of image files: {len(self.all_images)}')
         self.points = ([],[])
         self.drawing = False
         self.label = 0
         self.ix, self.iy = -1,-1
-        self.idx = start_0
+        self.idx = start
 
         self.annotations = {}
-        self.dump_file = 'annotations.pkl'
+        self.dump_file = 'annotations_test.pkl'
         if os.path.isfile(self.dump_file):
             with open(self.dump_file, 'rb') as f:
                 self.annotations = pickle.load(f)
@@ -99,6 +101,8 @@ class ScribbleAnnotator:
 
     def load_img(self):
         self.img = cv2.resize(cv2.imread(self.all_images[self.idx]), (540, 432))
+        # self.img = cv2.putText(self.img, self.all_images[self.idx].split('/')[-1],
+        #                     (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
 
     def mainloop(self):
         cv2.namedWindow('image')
@@ -141,5 +145,5 @@ class ScribbleAnnotator:
         print(f'Total images with annotations: {len(self.annotations.keys())}')
 
 if __name__=='__main__':
-    scr = ScribbleAnnotator(True)
+    scr = ScribbleAnnotator(0)
     scr.mainloop()

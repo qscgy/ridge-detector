@@ -193,7 +193,6 @@ def fill_arc_v2(locs, params, device='cuda', outsize=216):
 
     t1 = (alpha-np.pi/2-theta)%(2*np.pi)
     t2 = (2*theta)%(2*np.pi)
-    print(theta[0,0,0,0]/np.pi)
 
     center = locs.clone()
     center[:,0] = (locs[:,0]-R1*torch.cos(alpha-np.pi/2))[:,0]
@@ -242,7 +241,6 @@ if __name__=='__main__':
     theta = torch.rand(4,1,3,3).cuda()*np.pi
     params = torch.cat((R1, R2, alpha, theta), 1)
     mask = fill_arc_v2(center, params)
-    print(mask.shape)
     
     fig, ax = plt.subplots(1,1,figsize=(7,7))
     # for i in range(3):

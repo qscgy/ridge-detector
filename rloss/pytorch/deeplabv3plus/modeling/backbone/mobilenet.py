@@ -68,7 +68,7 @@ class InvertedResidual(nn.Module):
 
 
 class MobileNetV2(nn.Module):
-    def __init__(self, output_stride=8, BatchNorm=None, width_mult=1., pretrained=True):
+    def __init__(self, output_stride=8, BatchNorm=None, width_mult=1., pretrained=True, in_channels=3):
         super(MobileNetV2, self).__init__()
         block = InvertedResidual
         input_channel = 32
@@ -85,9 +85,10 @@ class MobileNetV2(nn.Module):
             [6, 320, 1, 1],
         ]
 
+        self.in_channels = in_channels
         # building first layer
         input_channel = int(input_channel * width_mult)
-        self.features = [conv_bn(3, input_channel, 2, BatchNorm)]
+        self.features = [conv_bn(in_channels, input_channel, 2, BatchNorm)]
         current_stride *= 2
         # building inverted residual blocks
         for t, c, n, s in interverted_residual_setting:
@@ -124,9 +125,16 @@ class MobileNetV2(nn.Module):
         pretrain_dict = model_zoo.load_url('http://jeff95.me/models/mobilenet_v2-6a65762b.pth')
         model_dict = {}
         state_dict = self.state_dict()
+        repeat = int(math.ceil(self.in_channels/3))
         for k, v in pretrain_dict.items():
             if k in state_dict:
-                model_dict[k] = v
+                # Using the method from timm to copy the weights so we can use more input channels
+                if (self.in_channels==3) or (k != 'features.0.0.weight' and k != 'features.0.0.bias'):
+                    model_dict[k] = v
+                else:
+                    value_4 = v.repeat(1, repeat, 1, 1)[:, :self.in_channels]
+                    value_4 *= (3/float(self.in_channels))
+                    model_dict[k] = value_4
         state_dict.update(model_dict)
         self.load_state_dict(state_dict)
 
@@ -144,7 +152,7 @@ class MobileNetV2(nn.Module):
                 m.bias.data.zero_()
 
 if __name__ == "__main__":
-    input = torch.rand(1, 3, 512, 512)
+    input = torch.rand(1, 4, 512, 512)
     model = MobileNetV2(output_stride=16, BatchNorm=nn.BatchNorm2d)
     output, low_level_feat = model(input)
     print(output.size())

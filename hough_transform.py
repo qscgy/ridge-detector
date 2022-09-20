@@ -19,12 +19,22 @@ def hough_circle(grad, rs):
         votes[i][vote_coords[i,:,0]][vote_coords[i,:,1]] = np.tan(grad_norm.flatten()-0.1)
     return votes
 
-img = cv2.imread('labels.png')
-img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-sobelx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=5)
-sobely = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=5)
-grad = np.stack((sobelx, sobely), 2)
-votes = hough_circle(grad, np.arange(1, 41, 10))
+img = cv2.imread('frame029660.jpg')
+src = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-plt.imshow(votes)
-plt.show()
+# sobelx = cv2.Sobel(src, cv2.CV_64F, 1, 0, ksize=5)
+# sobely = cv2.Sobel(src, cv2.CV_64F, 0, 1, ksize=5)
+# grad = np.stack((sobelx, sobely), 2)
+# laplacian = cv2.Laplacian(src, cv2.CV_16S, ksize=5)
+
+polar = cv2.linearPolar(img, (130, 139), np.sqrt(img.shape[0]**2 + img.shape[1]**2), cv2.WARP_FILL_OUTLIERS)
+squashed = cv2.resize(src, (src.shape[0], src.shape[1]//4))
+
+cv2.imshow('Original', img)
+cv2.imshow('Squashed', squashed)
+cv2.waitKey(0)
+
+# votes = hough_circle(grad, np.arange(1, 41, 10))
+
+# plt.imshow(votes)
+# plt.show()

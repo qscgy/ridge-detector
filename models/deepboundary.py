@@ -10,7 +10,7 @@ from .boundary import BoundaryBranch
 # Adapted from Meng Tang et al. (2018)
 class DeepBoundary(nn.Module):
     def __init__(self, backbone='resnet', output_stride=16, num_classes=21,
-                 sync_bn=True, freeze_bn=False):
+                 sync_bn=True, freeze_bn=False, boundary=False, in_channels=3):
         super(DeepBoundary, self).__init__()
         if backbone == 'drn':
             output_stride = 8
@@ -19,8 +19,10 @@ class DeepBoundary(nn.Module):
             BatchNorm = SynchronizedBatchNorm2d
         else:
             BatchNorm = nn.BatchNorm2d
+        
+        self.boundary = boundary
 
-        self.backbone = build_backbone(backbone, output_stride, BatchNorm)
+        self.backbone = build_backbone(backbone, output_stride, BatchNorm, in_channels=in_channels)
         self.aspp = build_aspp(backbone, output_stride, BatchNorm)
         self.decoder = build_decoder(num_classes, backbone, BatchNorm)
 
@@ -38,14 +40,17 @@ class DeepBoundary(nn.Module):
         x = self.decoder(x1, low_level_feat)
         x = F.interpolate(x, size=input.size()[2:], mode='bilinear', align_corners=True)
 
-        s = self.shape_aspp(x0)
-        # s = self.shape_decoder(s, low_level_feat)
-        mask, params = self.boundary_branch(s)
-        mask = mask.permute(2,0,1).unsqueeze(1)
-        mask = F.interpolate(mask, size=input.size()[2:], mode='bilinear', align_corners=True)
-        mask = torch.round(mask)    # interpolate may create fractional entries which make casting to bool unpredictable
+        if self.boundary:
+            s = self.shape_aspp(x0)
+            # s = self.shape_decoder(s, low_level_feat)
+            mask, params = self.boundary_branch(s)
+            mask = mask.permute(2,0,1).unsqueeze(1)
+            mask = F.interpolate(mask, size=input.size()[2:], mode='bilinear', align_corners=True)
+            mask = torch.round(mask)    # interpolate may create fractional entries which make casting to bool unpredictable
 
-        return x, mask, params
+            return x, mask, params
+        
+        return x
 
     def freeze_bn(self):
         for m in self.modules():

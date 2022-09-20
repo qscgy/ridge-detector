@@ -45,10 +45,13 @@ class Trainer(object):
 
         # Define network
         model = DeepBoundary(num_classes=self.nclass,
-                        backbone=args.backbone,
-                        output_stride=args.out_stride,
-                        sync_bn=args.sync_bn,
-                        freeze_bn=args.freeze_bn)
+                            backbone=args.backbone,
+                            output_stride=args.out_stride,
+                            sync_bn=args.sync_bn,
+                            freeze_bn=args.freeze_bn,
+                            boundary=(self.args.bd_loss>0 or self.args.lt_loss>0),
+                            in_channels=self.args.in_chan,
+                            )
 
         train_params = [{'params': model.get_1x_lr_params(), 'lr': args.lr},
                         {'params': model.get_10x_lr_params(), 'lr': args.lr * 10}]
@@ -128,31 +131,40 @@ class Trainer(object):
         softmax = nn.Softmax(dim=1)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
+            if self.args.in_chan != 3:
+                depth = sample['depth']
+                image = torch.cat((image, depth), 1)
             croppings = (target!=254).float()
             target[target==254]=255
             # Pixels labeled 255 are those unlabeled pixels. Padded region are labeled 254.
             # see function RandomScaleCrop in dataloaders/custom_transforms.py for the detail in data preprocessing
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
+
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
-            output, mask, params = self.model(image)
-            
-            mask = mask*croppings[:,None].cuda()
-            mask = mask[:,0].bool()
+
+            if self.args.bd_loss>0 or self.args.lt_loss>0:
+                output, mask, params = self.model(image)
+                mask = mask*croppings[:,None].cuda()
+                mask = mask[:,0].bool()
+            else:
+                output = self.model(image)
 
             celoss = self.criterion(output, target)
             loss = celoss
             reg_lossvals = {}
 
-            bloss = (self.boundary_loss(output, mask))*self.args.bd_loss
-            # bloss = pixel_matching_loss(mask, target)*self.args.bd_loss
-            loss = loss + bloss
-            reg_lossvals['boundary_loss'] = bloss.item()
+            if self.args.bd_loss>0:
+                bloss = (self.boundary_loss(output, mask))*self.args.bd_loss
+                # bloss = pixel_matching_loss(mask, target)*self.args.bd_loss
+                loss = loss + bloss
+                reg_lossvals['boundary_loss'] = bloss.item()
 
-            lt_loss = (params[:,1].abs().mean() + (params[:,3]-2*np.pi).abs().mean())*self.args.lt_loss
-            loss = loss + lt_loss
-            reg_lossvals['long_thin_loss'] = lt_loss.item()
+            if self.args.lt_loss>0:
+                lt_loss = (params[:,1].abs().mean() + (params[:,3]-2*np.pi).abs().mean())*self.args.lt_loss
+                loss = loss + lt_loss
+                reg_lossvals['long_thin_loss'] = lt_loss.item()
 
             probs=None
             if self.args.densecrfloss>0 or self.args.ncloss>0:
@@ -186,7 +198,7 @@ class Trainer(object):
                 self.summary.visualize_image(
                     self.writer, 
                     self.args.dataset, 
-                    image, target, output, 
+                    image[:, :3], target, output, 
                     self.total_iters,
                     regions=mask if self.args.bd_loss>0 else None,
                     )
@@ -218,11 +230,17 @@ class Trainer(object):
         test_loss = 0.0
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
+            if self.args.in_chan != 3:
+                depth = sample['depth']
+                image = torch.cat((image, depth), 1)
             target[target==254]=255
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
             with torch.no_grad():
-                output, mask, params = self.model(image)
+                if self.args.bd_loss>0 or self.args.lt_loss>0:
+                    output, mask, params = self.model(image)
+                else:
+                    output = self.model(image)
             loss = self.criterion(output, target)
             test_loss += loss.item()
             tbar.set_description('Test loss: %.3f' % (test_loss / (i + 1)))
@@ -351,6 +369,8 @@ def main():
 
     parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
     parser.add_argument('--lt-loss', type=float, default=0, help="'long and thin' loss weight")
+
+    parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
 
     args = parser.parse_args()
     

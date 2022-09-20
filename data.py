@@ -26,6 +26,14 @@ def make_data_loader(*args, **kwargs):
 
     return train_loader, val_loader, test_loader, num_class
 
+def get_depth_from_image(fname):
+    path = fname.split('/')
+    frame = path[-1].split('.')[0]
+    depth = os.path.join(*path[:-2], 'colon_norm_preall_abs_nosm', f'{frame}_disp.npy')
+    if fname[0]=='/':
+        depth = '/'+depth
+    return depth
+
 class FoldSegmentation(Dataset):
     NUM_CLASSES = 2
     def __init__(
@@ -51,6 +59,12 @@ class FoldSegmentation(Dataset):
             self.labels = pickle.load(f)
 
         self.images = list(self.labels.keys())
+
+        if self.args.in_chan==4:
+            self.depths = [get_depth_from_image(l) for l in self.images]
+        else:
+            self.depths = None
+
         if self.split=='train':
             self.images = self.images[:int(0.9*len(self.images))]
         elif self.split=='val':
@@ -83,6 +97,8 @@ class FoldSegmentation(Dataset):
             sample = im
         else:
             sample = {'image':im, 'label':Image.fromarray(labels)}
+            if self.depths is not None:
+                sample['depth'] = Image.fromarray(np.load(self.depths[index]))
 
         if self.split == "train":
             return self.transform_tr(sample)
