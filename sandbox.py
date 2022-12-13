@@ -8,6 +8,8 @@ import numpy as np
 from natsort import natsorted
 import os, random
 import cv2
+import glob
+from infer_scribble import save_preds, process_foldit
 
 def renormalize():
     parser = argparse.ArgumentParser()
@@ -59,6 +61,15 @@ def make_test_set(base_dir):
     with open('test_set.pkl', 'wb') as f:
         pickle.dump(test_set, f)
 
+def get_uncorr(root):
+    corr = glob.glob(os.path.join(root, '*.jpg'))
+    for c in corr:
+        path = c.split('/')[-1]
+        video = path[:-16]
+        frame = path[-15:]
+        im = cv2.imread(os.path.join('/playpen/Datasets/geodepth2', video, 'image', frame))
+        cv2.imwrite(os.path.join('/playpen/Datasets/test-set-uncorr', f'{video}_{frame}'), im)
+
 def depth_derivative():
     im = np.load('/playpen/Datasets/geodepth2/007/colon_norm_preall_abs_nosm/frame014287_disp.npy')
     im = im/np.max(im)
@@ -73,6 +84,17 @@ def show():
     cv2.imshow('image', im)
     cv2.waitKey(0)
 
+def do_svd():
+    im = cv2.imread('/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4/ex_0_louis/results/000_frame031221.jpg')
+    img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    U, s, Vh = np.linalg.svd(img)
+    print(U.shape)
+    print(Vh.shape)
+    print(s.shape)
+
+    cv2.imshow('image', im)
+    cv2.waitKey(0)
+
 if __name__ == '__main__':
     # make_test_set('/playpen/Datasets/geodepth2')
     # with open('test_set.pkl', 'rb') as f:
@@ -84,4 +106,6 @@ if __name__ == '__main__':
     #     dst = os.path.join('/playpen/Datasets/test-set', f'{path[-3]}_{path[-1]}')
     #     shutil.copy(i, dst)
     # depth_derivative()
-    show()
+    # show()
+    # get_uncorr('/playpen/Datasets/test-set')
+    do_svd()

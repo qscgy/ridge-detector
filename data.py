@@ -8,6 +8,7 @@ import os
 import glob
 import pickle
 from natsort import natsorted
+import random
 
 # MEAN = [0.55615947, 0.6482298, 0.84056612]
 # STDEV = [0.15693977, 0.16230874, 0.15292975]
@@ -44,6 +45,7 @@ class FoldSegmentation(Dataset):
         bstroke=9,
     ):
         super().__init__()
+        random.seed(1917)
         if isinstance(_args, tuple):
                 self.args = _args[0]
         else:
@@ -60,26 +62,29 @@ class FoldSegmentation(Dataset):
 
         self.images = list(self.labels.keys())
 
+        self.perm = list(range(len(self.images)))   # random permutation of images and depths
+        random.shuffle(self.perm)
+
         if self.args.in_chan==4:
             self.depths = [get_depth_from_image(l) for l in self.images]
         else:
             self.depths = None
 
         if self.split=='train':
-            self.images = self.images[:int(0.9*len(self.images))]
+            self.perm = self.perm[:int(0.9*len(self.perm))]
         elif self.split=='val':
-            self.images = self.images[int(0.9*len(self.images)):]
+            self.perm = self.perm[int(0.9*len(self.perm)):]
         elif self.split=='test':
             pass    # base_dir should be the separate test folder
         else:
             raise ValueError("Only 'train', 'val', and 'test' are currently implemented as splits.")
 
     def __len__(self):
-        return len(self.images)
+        return len(self.perm)
     
     def __getitem__(self, index):
-        im_name = self.images[index]
-        im = Image.open(im_name)
+        im_name = self.images[self.perm[index]]
+        im = Image.open(im_name.replace('img_corr', 'image'))
         fg_labels, bg_labels = self.labels[im_name]
         labels = np.ones((432, 540, 3))*255
         for l in fg_labels:
@@ -98,7 +103,8 @@ class FoldSegmentation(Dataset):
         else:
             sample = {'image':im, 'label':Image.fromarray(labels)}
             if self.depths is not None:
-                sample['depth'] = Image.fromarray(np.load(self.depths[index]))
+                # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
+                sample['depth'] = Image.fromarray(np.load(get_depth_from_image(im_name)))
 
         if self.split == "train":
             return self.transform_tr(sample)

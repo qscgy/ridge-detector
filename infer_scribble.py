@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image, ImageFilter
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from torchvision import transforms
 from torchvision.utils import make_grid
 from torchvision.datasets import ImageFolder
@@ -14,6 +15,8 @@ from torch.autograd import Variable
 from os.path import join, isdir
 from models.deepboundary import DeepBoundary
 import cv2
+from sklearn.metrics import classification_report, confusion_matrix
+import pandas as pd
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
 from data import FoldSegmentation, MEAN, STDEV, get_depth_from_image
@@ -22,6 +25,7 @@ from rloss.pytorch.deeplabv3plus.dataloaders.custom_transforms import NormalizeI
 from rloss.pytorch.deeplabv3plus.modeling.sync_batchnorm.replicate import patch_replication_callback
 from rloss.pytorch.deeplabv3plus.modeling.deeplab import *
 from rloss.pytorch.deeplabv3plus.utils.saver import Saver
+from rloss.pytorch.deeplabv3plus.utils.loss import SegmentationLosses
 import time
 import multiprocessing
 import glob
@@ -33,30 +37,51 @@ from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 global grad_seg
 
 class FixedImageDataset(Dataset):
-    def __init__(self, crop_size, in_channels=3, gt=False):
+    def __init__(self, crop_size, in_channels=3, gt=False, process=True):
         super().__init__()
         # self.images = glob.glob(os.path.join(root, '*.jpg'))[:25]
         # print(self.images)
         # self.images = ['/playpen/Datasets/scribble-test/testA/011_frame014577.jpg', '/playpen/Datasets/scribble-test/testA/061_frame008798.jpg', '/playpen/Datasets/scribble-test/testA/030_frame021700.jpg', '/playpen/Datasets/scribble-test/testA/036_frame028843.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037529.jpg', '/playpen/Datasets/scribble-test/testA/015_frame017096.jpg', '/playpen/Datasets/scribble-test/testA/028_frame020968.jpg', '/playpen/Datasets/scribble-test/testA/047_frame013507.jpg', '/playpen/Datasets/scribble-test/testA/022_frame021904.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov12_13-56-23_001_frame024463.jpg', '/playpen/Datasets/scribble-test/testA/059_frame008342.jpg', '/playpen/Datasets/scribble-test/testA/066_frame016078.jpg', '/playpen/Datasets/scribble-test/testA/008_frame033659.jpg', '/playpen/Datasets/scribble-test/testA/007_frame014436.jpg', '/playpen/Datasets/scribble-test/testA/008_frame034035.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026291.jpg', '/playpen/Datasets/scribble-test/testA/011_frame014067.jpg', '/playpen/Datasets/scribble-test/testA/058_frame159460.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Oct18_13-33-20_002_frame033516.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Feb08_12-20-44_001_frame007594.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007386.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007252.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026260.jpg', '/playpen/Datasets/scribble-test/testA/005_frame053501.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037552.jpg']
-        with open('test_set.pkl', 'rb') as f:
-            self.images = pickle.load(f)
+        self.process = process
+        if process:
+            with open('test_set.pkl', 'rb') as f:
+                self.images = pickle.load(f)
+        else:
+            with open('annotations_019.pkl', 'rb') as f:
+                self.images = list(pickle.load(f).keys())
         self.images = natsorted(self.images)
         self.depths = None
+
         if in_channels > 3:
-            self.depths = [get_depth_from_image(l) for l in self.images]
-            # for i in range(len(self.depths)):
-            #     fname = self.depths[i]
-            #     path = fname.split('/')
-            #     rdir = ('/' if fname[0]=='/' else '') + os.path.join(*path[:-3], 'geodepth2')
-            #     ddir = '_'.join(path[-1].split('_')[:-2])
-            #     self.depths[i] = os.path.join(rdir, ddir, 'colon_norm_preall_abs_nosm', path[-1][len(ddir)+1:])
-        
+            if not process:
+                self.depths = [os.path.join('/playpen/Datasets/geodepth2/019/colon_norm_preall_abs_nosm', l.split('/')[-1].split('.')[0]+'_disp.npy') for l in self.images]
+            else:
+                self.depths = [get_depth_from_image(l) for l in self.images]
+
+                # for i in range(len(self.depths)):
+                #     fname = self.depths[i]
+                #     path = fname.split('/')
+                #     rdir = ('/' if fname[0]=='/' else '') + os.path.join(*path[:-3], 'geodepth2')
+                #     ddir = '_'.join(path[-1].split('_')[:-2])
+                #     self.depths[i] = os.path.join(rdir, ddir, 'colon_norm_preall_abs_nosm', path[-1][len(ddir)+1:])
+
         self.labels = None
         if gt:
-            with open('test_set.pkl', 'rb') as f:
-                self.labels = pickle.load(f)
+            label_file = 'annotations_test.pkl' if process else 'annotations_019.pkl'
+            with open(label_file, 'rb') as f:
+                in_labels = pickle.load(f)
             
+            if not process:
+                self.labels = in_labels
+            else:
+                # translate file names between the one used for the key and the image name in test_set.pkl (###/img_corr)
+                self.labels = {}
+                for k in in_labels:
+                    path = k.split('/')[-1]
+                    test_path = os.path.join('/playpen/Datasets/geodepth2/', path[:-16], 'img_corr', path[-15:])
+                    self.labels[test_path] = in_labels[k]
 
+        self.crop_size = crop_size
         self.transform = transforms.Compose([
             transforms.Resize((crop_size, crop_size)),
             transforms.ToTensor(),
@@ -73,7 +98,10 @@ class FixedImageDataset(Dataset):
     
     def __getitem__(self, index):
         im_name = self.images[index]
-        im = Image.open(im_name)
+        if self.process:
+            im = Image.open(im_name.replace('img_corr', 'image'))
+        else:
+            im = Image.open(im_name)
         ims = self.transform(im)
 
         if self.depths:
@@ -81,17 +109,22 @@ class FixedImageDataset(Dataset):
             depth = self.depth_transform(depth)
             # print(depth.shape)
             # print(ims.shape)
-            return torch.cat((ims, depth), 0)
+            ims = torch.cat((ims, depth), 0)
         
         if self.labels:
             fg_labels, bg_labels = self.labels[im_name]
             labels = np.ones((432, 540, 3))*255
             for l in fg_labels:
                 if len(l) > 0:
-                    cv2.polylines(labels, np.array([l]), False, (1, 0, 0), self.fstroke)
+                    cv2.polylines(labels, np.array([l]), False, (1, 0, 0), 2)
             for l in bg_labels:
                 if len(l) > 0:
-                    cv2.polylines(labels, np.array([l]), False, (0, 0, 0), self.bstroke)
+                    cv2.polylines(labels, np.array([l]), False, (0, 0, 0), 2)
+            labels = cv2.resize(labels, (self.crop_size, self.crop_size))
+            labels[labels>1] = 255
+            labels = labels[:,:,0].astype(np.uint8)
+            return ims, labels
+
         return ims
 
 def process_foldit(results_dir, size):
@@ -116,6 +149,12 @@ def save_preds(preds, images, save_dir):
             path = images[i].split('/')
             # print(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'))
             cv2.imwrite(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.jpg'), im)
+
+def postprocess(preds):
+    output = np.zeros_like(preds)
+    for i in range(len(preds)):
+        pred = preds[i]
+        nblobs, labels, stats, _ = cv2.connectedComponentsWithStats(pred, connectivity=4)
 
 def main():
 
@@ -159,6 +198,9 @@ def main():
 
     parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
 
+    parser.add_argument('--sequence', action='store_true', help='use 019 sequence images')
+    parser.add_argument('--use-examples', action='store_true', help='use preselected examples or all test images')
+
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     
@@ -187,7 +229,9 @@ def main():
         raise RuntimeError("=> no checkpoint found at '{}'" .format(args.checkpoint))
     checkpoint = torch.load(args.checkpoint)
     if args.cuda:
-        model.module.load_state_dict(checkpoint['state_dict'])
+        model.module.load_state_dict(checkpoint['state_dict'], strict=False)
+        if 'pam.alpha.k' in checkpoint['state_dict']:
+            print(checkpoint['state_dict']['pam.alpha.k'])
     else:
         model.load_state_dict(checkpoint['state_dict'])
     best_pred = checkpoint['best_pred']
@@ -197,14 +241,15 @@ def main():
     model.eval()
 
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
-    test_data = FixedImageDataset(crop_size=args.crop_size, in_channels=args.in_chan)
+    test_data = FixedImageDataset(crop_size=args.crop_size, in_channels=args.in_chan, gt=True, process=not args.sequence)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
-    regions = torch.zeros(segmentations.shape)
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
     softmax = nn.Softmax(dim=1)
+    labels = torch.zeros_like(segmentations)
 
-    for i, image in enumerate(test_loader):
+    for i, (image, label) in enumerate(test_loader):
+        labels[i] = label
         if not args.no_cuda:
             image = image.cuda()
         output = model(image)
@@ -212,60 +257,129 @@ def main():
         segmentations[i] = probs[:,1].detach().cpu()
         # images[i] = unnorm.detach().cpu()
         images[i] = denormalizeimage(image[:,:3], MEAN, STDEV)/255.0
-        # regions[i] = mask.squeeze().detach().cpu()
 
     segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
     images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
-    thresh = 0.5
+    labels = labels.reshape(*segmentations.shape)
+    thresh = 0.3    # TODO this is important! Dropping thresh to 0.3 frmo 0.5 improves accuracy!
     pred = (segmentations > thresh)
 
+    # compute metrics
+    pred_list = pred[labels<2].astype(np.uint8)
+    label_list = labels[labels<2]
+    my_report = classification_report(label_list, pred_list, target_names=['Not ridge', 'Ridge'], output_dict=True)
+    foldit_pred_mask = process_foldit(f'/playpen/CEP/results/foldit_public/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
+    foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
+    foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not ridge', 'Ridge'], output_dict=True)
+    print(confusion_matrix(label_list, foldit_pred_list))
+
+    my_accs = np.zeros(segmentations.shape[0])
+    for i in range(len(my_accs)):
+        pred_i = pred[i][labels[i]<2].astype(np.uint8)
+        label_i = labels[i][labels[i]<2]
+        report_i = classification_report(label_i, pred_i, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        my_accs[i] = report_i['accuracy']
+    print(my_accs.mean())
+    print(np.std(my_accs))
+
+    fi_accs = np.zeros(segmentations.shape[0])
+    for i in range(len(my_accs)):
+        pred_i = foldit_pred_mask[i][labels[i]<2].astype(np.uint8)
+        label_i = labels[i][labels[i]<2]
+        report_i = classification_report(label_i, pred_i, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        fi_accs[i] = report_i['accuracy']
+    print(fi_accs.mean())
+    print(np.std(fi_accs))
+
+    my_df = pd.DataFrame(my_report).transpose()
+    foldit_df = pd.DataFrame(foldit_report).transpose()
+    print('Mine')
+    print(my_df)
+    print('\nFoldIt')
+    print(foldit_df)
+
+    for k1 in ['Not ridge', 'Ridge']:
+        line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.4f}}}, {foldit_report[k1][k2]:.4f})' for k2 in ['precision', 'recall', 'f1-score']])
+        print(f'{k1} & {line} \\\\')
+        
+    if args.use_examples:
+        im_inds = [0, 1, 2, 3, 7, 14]
+        if args.sequence:
+            im_inds = [0,1,2,3,4]
+        ncol = len(im_inds)
+    else:
+        im_inds = list(range(len(images)))
+        ncol = int(np.sqrt(len(im_inds)))
+
     # visualize prediction
-    fig, ax = plt.subplots(1, 3, figsize=(20, 7))
-    plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
-    grid = make_grid(torch.from_numpy(images), int(np.sqrt(images.shape[0]))).numpy().transpose(1,2,0)
-    ax[0].imshow(grid)
-    ax[0].set_title('Input frames')
-    ax[0].axis('off')
+    # fig, ax = plt.subplots(1, 3, figsize=(20, 7))
+    # plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
+    grid_o = make_grid(torch.from_numpy(images[im_inds]), ncol).numpy().transpose(1,2,0)
+    # ax[0].imshow(grid_o)
+    # ax[0].set_title('Input frames')
+    # ax[0].axis('off')
     
     my_preds = np.copy(images).transpose(1,0,2,3)
     my_preds[0][pred] = 0
     my_preds = my_preds.transpose(1, 0, 2, 3)
-    grid = make_grid(torch.from_numpy(my_preds), int(np.sqrt(my_preds.shape[0]))).numpy().transpose(1,2,0)
-    ax[1].imshow(grid)
-    ax[1].set_title('Fold predictions in green')
-    ax[1].axis('off')
+    grid_m = make_grid(torch.from_numpy(my_preds[im_inds]), ncol).numpy().transpose(1,2,0)
+    # ax[1].imshow(grid_m)
+    # ax[1].set_title('Fold predictions in green')
+    # ax[1].axis('off')
 
-    foldit_pred_mask = process_foldit('/playpen/CEP/results/foldit_public/test_latest/images', (216, 216))
     foldit_preds = np.copy(images).transpose(1,0,2,3)
     foldit_preds[0][foldit_pred_mask] = 0
     foldit_preds = foldit_preds.transpose(1, 0, 2, 3)
-    grid = make_grid(torch.from_numpy(foldit_preds), int(np.sqrt(foldit_preds.shape[0]))).numpy().transpose(1,2,0)
-    ax[2].imshow(grid)
-    ax[2].set_title('Foldit predictions')
-    ax[2].axis('off')
+    grid_f = make_grid(torch.from_numpy(foldit_preds[im_inds]), ncol).numpy().transpose(1,2,0)
+    # ax[2].imshow(grid_f)
+    # ax[2].set_title('Foldit predictions')
+    # ax[2].axis('off')
 
-    # regions = regions.reshape(-1, 1, args.crop_size, args.crop_size)
-    # print(regions.min(), regions.max())
-    # grid = make_grid(regions, int(np.sqrt(regions.shape[0])), scale_each=True).numpy().transpose(1,2,0)
-    # print(grid.dtype)
-    # ax[1][0].imshow(grid)
-    # ax[1][0].set_title('Region masks')
-    # ax[1][0].axis('off')
+    # plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
+    # plt.close()
+    
+    if args.use_examples:
+        foldit_pred_mask_2 = process_foldit(f'/playpen/CEP/results/foldit_internal/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
+        foldit_pred_list_2 = foldit_pred_mask[labels<2].astype(np.uint8)
+        foldit_preds2 = np.copy(images).transpose(1,0,2,3)
+        foldit_preds2[0][foldit_pred_mask_2] = 0
+        foldit_preds2 = foldit_preds2.transpose(1, 0, 2, 3)
+        grid_f2 = make_grid(torch.from_numpy(foldit_preds2[im_inds]), ncol).numpy().transpose(1,2,0)
 
-    plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
+        foldit_report2 = classification_report(label_list, foldit_pred_list_2, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        print('Foldit-UNC\n')
+        print(pd.DataFrame(foldit_report2).transpose())
 
-    preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine')
-    foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit')
-    orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original')
-    save_preds(my_preds, test_data.images, preds_dir)
-    save_preds(foldit_preds, test_data.images, foldit_dir)
-    save_preds(images, test_data.images, orig_dir)
+        rois = [((42, 157),(114,210), (0,1,0), 2),
+        ((397,8), (426,71), (0,1,0), 2),
+        ((493, 98), (547, 175), (0,1,0), 2),
+        ((818, 135), (868, 202), (1,0,0), 2),
+        ((1146, 91), (1207, 213), (1,0,0), 2),
+        ]
+        for r in rois:
+            # grid_o = cv2.rectangle(grid_o.copy(), *r)
+            grid_m = cv2.rectangle(grid_m.copy(), *r)
+            grid_f = cv2.rectangle(grid_f.copy(), *r)
+        #     grid_f2 = cv2.rectangle(grid_f2.copy(), *r)
 
-    # plt.figure(FIGSIZE=(14, 7))
-    # plt.title(f'P(fold) for experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
-    # grid = segmentations
-    # plt.imshow(segmentations[0,1].detach().cpu().numpy(), cmap='jet')
-    # plt.colorbar()
+        plt.figure(figsize=(13,6))
+        # plt.imshow(np.vstack((grid_o,grid_m,grid_f,grid_f2)))
+        plt.imshow(np.vstack((grid_o,grid_m,grid_f)))
+        plt.xticks([])
+        plt.yticks([])
+        plt.text(-20,216/2, 'Original', fontsize=22, horizontalalignment='right', verticalalignment='center')
+        plt.text(-20, 216*1.5, 'Mine', fontsize=22, horizontalalignment='right', verticalalignment='center')
+        plt.text(-20, 216*2.5, 'FoldIt', fontsize=22, horizontalalignment='right', verticalalignment='center')
+        # plt.text(-20, 216*3.5, 'FoldIt-UNC', fontsize=22, horizontalalignment='right', verticalalignment='center')
+
+        # plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
+
+    preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine-019')
+    foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit-internal-019')
+    orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original-019')
+    # save_preds(my_preds, test_data.images, preds_dir)
+    # save_preds(foldit_preds, test_data.images, foldit_dir)
+    # save_preds(images, test_data.images, orig_dir)
 
     plt.show()
     

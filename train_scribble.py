@@ -51,6 +51,7 @@ class Trainer(object):
                             freeze_bn=args.freeze_bn,
                             boundary=(self.args.bd_loss>0 or self.args.lt_loss>0),
                             in_channels=self.args.in_chan,
+                            rw=True,
                             )
 
         train_params = [{'params': model.get_1x_lr_params(), 'lr': args.lr},

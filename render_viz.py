@@ -44,7 +44,7 @@ def render_webpage(orig_dir, my_dir, foldit_dir, out_dir, randomize=False):
             <a href="{both[rand_swaps[i]][i]}">
               <img src="{both[rand_swaps[i]][i]}" style="width:216px">
             </a><br>
-            <p>Experiment 1</p>
+            <p>Ours</p>
           </p>
         </td>
         <td halign="center" style="word-wrap: break-word;" valign="top">
@@ -52,7 +52,7 @@ def render_webpage(orig_dir, my_dir, foldit_dir, out_dir, randomize=False):
             <a href="{both[1-rand_swaps[i]][i]}">
               <img src="{both[1-rand_swaps[i]][i]}" style="width:216px">
             </a><br>
-            <p>Experiment 2</p>
+            <p>FoldIt</p>
           </p>
         </td>
       </tr>
@@ -62,9 +62,9 @@ def render_webpage(orig_dir, my_dir, foldit_dir, out_dir, randomize=False):
         h.write('</html>')
 
 if __name__=='__main__':
-    render_webpage('/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4/ex_0_louis/original',
-        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4/ex_0_louis/results-mine',
-        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4/ex_0_louis/results-foldit',
-        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4/ex_0_louis',
-        randomize=True
+    render_webpage('/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4-v2/ex_1_richard/original',
+        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4-v2/ex_1_richard/results-mine',
+        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4-v2/ex_1_richard/results-foldit-public',
+        '/playpen/ridge-dtec/run/pascal/deeplab-mobilenet4-v2/ex_1_richard',
+        randomize=False
         )

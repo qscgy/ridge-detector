@@ -11,9 +11,9 @@ import shutil
 import sys
 
 def get_all_images(base_dir):
-    # im_dirs = os.listdir(base_dir)
-    # im_dirs = natsorted(im_dirs)
-    im_dirs = ['']
+    im_dirs = os.listdir(base_dir)
+    im_dirs = natsorted(im_dirs)
+    # im_dirs = ['']
     images = []
     for d in im_dirs:
         # path = os.path.join(base_dir, d, 'img_corr')
@@ -29,7 +29,7 @@ def copy_random_sample(files, dst, n=200):
         im_dir = im.split('/')[-3]
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
-base_dir = '/playpen/Datasets/test-set'
+base_dir = '/playpen/Datasets/our-019-their-ma1'
 
 # all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 # copy_random_sample(all_images, 200)
@@ -45,7 +45,7 @@ class ScribbleAnnotator:
         self.idx = start
 
         self.annotations = {}
-        self.dump_file = 'annotations_test.pkl'
+        self.dump_file = 'annotations_019.pkl'
         if os.path.isfile(self.dump_file):
             with open(self.dump_file, 'rb') as f:
                 self.annotations = pickle.load(f)
@@ -100,6 +100,7 @@ class ScribbleAnnotator:
             cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (255,0,0), 2)
 
     def load_img(self):
+        # print(self.all_images[self.idx])
         self.img = cv2.resize(cv2.imread(self.all_images[self.idx]), (540, 432))
         # self.img = cv2.putText(self.img, self.all_images[self.idx].split('/')[-1],
         #                     (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
