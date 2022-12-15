@@ -104,7 +104,9 @@ class FoldSegmentation(Dataset):
             sample = {'image':im, 'label':Image.fromarray(labels)}
             if self.depths is not None:
                 # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
-                sample['depth'] = Image.fromarray(np.load(get_depth_from_image(im_name)))
+                depth_arr = np.load(get_depth_from_image(im_name))
+                sample['depth'] = Image.fromarray(depth_arr)
+                print(depth_arr.min(), depth_arr.max())
 
         if self.split == "train":
             return self.transform_tr(sample)

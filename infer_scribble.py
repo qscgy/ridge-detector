@@ -261,7 +261,7 @@ def main():
     segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
     images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
     labels = labels.reshape(*segmentations.shape)
-    thresh = 0.3    # TODO this is important! Dropping thresh to 0.3 frmo 0.5 improves accuracy!
+    thresh = 0.3    # TODO this is important! Dropping thresh to 0.3 from 0.5 improves accuracy!
     pred = (segmentations > thresh)
 
     # compute metrics
@@ -291,6 +291,9 @@ def main():
     print(fi_accs.mean())
     print(np.std(fi_accs))
 
+    plt.boxplot([my_accs, fi_accs])
+    plt.show()
+
     my_df = pd.DataFrame(my_report).transpose()
     foldit_df = pd.DataFrame(foldit_report).transpose()
     print('Mine')
@@ -311,31 +314,31 @@ def main():
         im_inds = list(range(len(images)))
         ncol = int(np.sqrt(len(im_inds)))
 
-    # visualize prediction
-    # fig, ax = plt.subplots(1, 3, figsize=(20, 7))
-    # plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
+    # Visualize prediction
+    fig, ax = plt.subplots(1, 3, figsize=(20, 7))
+    plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
     grid_o = make_grid(torch.from_numpy(images[im_inds]), ncol).numpy().transpose(1,2,0)
-    # ax[0].imshow(grid_o)
-    # ax[0].set_title('Input frames')
-    # ax[0].axis('off')
+    ax[0].imshow(grid_o)
+    ax[0].set_title('Input frames')
+    ax[0].axis('off')
     
     my_preds = np.copy(images).transpose(1,0,2,3)
     my_preds[0][pred] = 0
     my_preds = my_preds.transpose(1, 0, 2, 3)
     grid_m = make_grid(torch.from_numpy(my_preds[im_inds]), ncol).numpy().transpose(1,2,0)
-    # ax[1].imshow(grid_m)
-    # ax[1].set_title('Fold predictions in green')
-    # ax[1].axis('off')
+    ax[1].imshow(grid_m)
+    ax[1].set_title('Fold predictions in green')
+    ax[1].axis('off')
 
     foldit_preds = np.copy(images).transpose(1,0,2,3)
     foldit_preds[0][foldit_pred_mask] = 0
     foldit_preds = foldit_preds.transpose(1, 0, 2, 3)
     grid_f = make_grid(torch.from_numpy(foldit_preds[im_inds]), ncol).numpy().transpose(1,2,0)
-    # ax[2].imshow(grid_f)
-    # ax[2].set_title('Foldit predictions')
-    # ax[2].axis('off')
+    ax[2].imshow(grid_f)
+    ax[2].set_title('Foldit predictions')
+    ax[2].axis('off')
 
-    # plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
     # plt.close()
     
     if args.use_examples:
@@ -374,12 +377,15 @@ def main():
 
         # plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
 
-    preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine-019')
-    foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit-internal-019')
-    orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original-019')
-    # save_preds(my_preds, test_data.images, preds_dir)
-    # save_preds(foldit_preds, test_data.images, foldit_dir)
-    # save_preds(images, test_data.images, orig_dir)
+    preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine')
+    foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit-internal')
+    orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original')
+    if not os.path.isdir(preds_dir):
+        save_preds(my_preds, test_data.images, preds_dir)
+    if not os.path.isdir(foldit_dir):
+        save_preds(foldit_preds, test_data.images, foldit_dir)
+    if not os.path.isdir(orig_dir):
+        save_preds(images, test_data.images, orig_dir)
 
     plt.show()
     

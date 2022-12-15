@@ -51,7 +51,7 @@ class Trainer(object):
                             freeze_bn=args.freeze_bn,
                             boundary=(self.args.bd_loss>0 or self.args.lt_loss>0),
                             in_channels=self.args.in_chan,
-                            rw=True,
+                            rw=args.rw,
                             )
 
         train_params = [{'params': model.get_1x_lr_params(), 'lr': args.lr},
@@ -373,6 +373,8 @@ def main():
 
     parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
 
+    parser.add_argument('--rw', action='store_true', default=False, help='use random walks (do not use!)')
+
     args = parser.parse_args()
     
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -418,7 +420,7 @@ def main():
     torch.manual_seed(args.seed)
     trainer = Trainer(args)
     print('Starting Epoch:', trainer.args.start_epoch)
-    print('Total Epoches:', trainer.args.epochs)
+    print('Total Epochs:', trainer.args.epochs)
     for epoch in range(trainer.args.start_epoch, trainer.args.epochs):
         trainer.training(epoch)
         if not trainer.args.no_val and epoch % args.eval_interval == (args.eval_interval - 1):
