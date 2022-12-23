@@ -267,17 +267,17 @@ def main():
     # compute metrics
     pred_list = pred[labels<2].astype(np.uint8)
     label_list = labels[labels<2]
-    my_report = classification_report(label_list, pred_list, target_names=['Not ridge', 'Ridge'], output_dict=True)
+    my_report = classification_report(label_list, pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
     foldit_pred_mask = process_foldit(f'/playpen/CEP/results/foldit_public/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
     foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
-    foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not ridge', 'Ridge'], output_dict=True)
+    foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
     print(confusion_matrix(label_list, foldit_pred_list))
 
     my_accs = np.zeros(segmentations.shape[0])
     for i in range(len(my_accs)):
         pred_i = pred[i][labels[i]<2].astype(np.uint8)
         label_i = labels[i][labels[i]<2]
-        report_i = classification_report(label_i, pred_i, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True)
         my_accs[i] = report_i['accuracy']
     print(my_accs.mean())
     print(np.std(my_accs))
@@ -286,7 +286,7 @@ def main():
     for i in range(len(my_accs)):
         pred_i = foldit_pred_mask[i][labels[i]<2].astype(np.uint8)
         label_i = labels[i][labels[i]<2]
-        report_i = classification_report(label_i, pred_i, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True)
         fi_accs[i] = report_i['accuracy']
     print(fi_accs.mean())
     print(np.std(fi_accs))
@@ -300,6 +300,8 @@ def main():
     print(my_df)
     print('\nFoldIt')
     print(foldit_df)
+
+    exit(0)
 
     for k1 in ['Not ridge', 'Ridge']:
         line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.4f}}}, {foldit_report[k1][k2]:.4f})' for k2 in ['precision', 'recall', 'f1-score']])

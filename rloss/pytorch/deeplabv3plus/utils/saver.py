@@ -50,7 +50,7 @@ class Saver(object):
                 shutil.copyfile(filename, os.path.join(self.directory, 'model_best.pth.tar'))
 
     def save_experiment_config(self):
-        logfile = os.path.join(self.experiment_dir, 'parameters.txt')
+        logfile = os.path.join(self.experiment_dir, '_parameters.txt')
         log_file = open(logfile, 'w')
         # p = OrderedDict()
         # p['datset'] = self.args.dataset
