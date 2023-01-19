@@ -16,8 +16,9 @@ MEAN = [0.485, 0.456, 0.406]
 STDEV = [0.229, 0.224, 0.225]
 
 def make_data_loader(*args, **kwargs):
-    train_set = FoldSegmentation(args, split='train')
-    val_set = FoldSegmentation(args, split='val')
+    instance = ('instance' in kwargs and kwargs['instance']==True)
+    train_set = FoldSegmentation(args, split='train', instance=instance)
+    val_set = FoldSegmentation(args, split='val', instance=instance)
     args = args[0]
 
     num_class = train_set.NUM_CLASSES
@@ -43,6 +44,7 @@ class FoldSegmentation(Dataset):
         split='train',
         fstroke=5,
         bstroke=9,
+        instance=False,
     ):
         super().__init__()
         random.seed(1917)
@@ -55,6 +57,7 @@ class FoldSegmentation(Dataset):
         self.split = split
         self.fstroke = fstroke
         self.bstroke = bstroke
+        self.instance = instance
 
         self.labels = {}
         with open(os.path.join(self.scribble_dir, 'annotations.pkl'), 'rb') as f:
@@ -87,9 +90,9 @@ class FoldSegmentation(Dataset):
         im = Image.open(im_name.replace('img_corr', 'image'))
         fg_labels, bg_labels = self.labels[im_name]
         labels = np.ones((432, 540, 3))*255
-        for l in fg_labels:
+        for i, l in enumerate(fg_labels):
             if len(l) > 0:
-                cv2.polylines(labels, np.array([l]), False, (1, 0, 0), self.fstroke)
+                cv2.polylines(labels, np.array([l]), False, ((i+1 if self.instance else 1), 0, 0), self.fstroke)
         for l in bg_labels:
             if len(l) > 0:
                 cv2.polylines(labels, np.array([l]), False, (0, 0, 0), self.bstroke)
@@ -106,7 +109,7 @@ class FoldSegmentation(Dataset):
                 # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
                 depth_arr = np.load(get_depth_from_image(im_name))
                 sample['depth'] = Image.fromarray(depth_arr)
-                print(depth_arr.min(), depth_arr.max())
+                # print(depth_arr.min(), depth_arr.max())
 
         if self.split == "train":
             return self.transform_tr(sample)

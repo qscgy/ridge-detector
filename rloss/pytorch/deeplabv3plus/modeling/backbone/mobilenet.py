@@ -133,6 +133,7 @@ class MobileNetV2(nn.Module):
                     model_dict[k] = v
                 else:
                     value_4 = v.repeat(1, repeat, 1, 1)[:, :self.in_channels]
+                    # value_4 = torch.cat((v, torch.randn(v.shape[0], 1, *v.shape[2:])), 1)
                     value_4 *= (3/float(self.in_channels))
                     model_dict[k] = value_4
         state_dict.update(model_dict)

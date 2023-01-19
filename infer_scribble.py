@@ -148,7 +148,7 @@ def save_preds(preds, images, save_dir):
             # cv2.waitKey(0)
             path = images[i].split('/')
             # print(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'))
-            cv2.imwrite(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.jpg'), im)
+            cv2.imwrite(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'), im)
 
 def postprocess(preds):
     output = np.zeros_like(preds)
@@ -156,53 +156,8 @@ def postprocess(preds):
         pred = preds[i]
         nblobs, labels, stats, _ = cv2.connectedComponentsWithStats(pred, connectivity=4)
 
-def main():
+def main(args):
 
-    parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Inference")
-    parser.add_argument('--backbone', type=str, default='resnet',
-                        choices=['resnet', 'xception', 'drn', 'mobilenet'],
-                        help='backbone name (default: resnet)')
-    parser.add_argument('--gpu-ids', type=str, default='0',
-                        help='use which gpu to train, must be a \
-                        comma-separated list of integers only (default=0)')
-    parser.add_argument('--workers', type=int, default=4,
-                        metavar='N', help='dataloader threads')
-    parser.add_argument('--n_class', type=int, default=21)
-    parser.add_argument('--crop_size', type=int, default=513,
-                        help='crop image size')
-    parser.add_argument('--no_cuda', action='store_true', default=
-                        False, help='disables CUDA training')
-    # checking point
-    parser.add_argument('--checkpoint', type=str, default=None,
-                        help='put the path to checkpoint if needed')
-    # rloss options
-    parser.add_argument('--rloss-weight', type=float,
-                        metavar='M', help='densecrf loss')
-    parser.add_argument('--rloss-scale',type=float,default=0.5,
-                        help='scale factor for rloss input, choose small number for efficiency, domain: (0,1]')
-    parser.add_argument('--sigma-rgb',type=float,default=15.0,
-                        help='DenseCRF sigma_rgb')
-    parser.add_argument('--sigma-xy',type=float,default=80.0,
-                        help='DenseCRF sigma_xy')
-    parser.add_argument('--batch-size', type=int, default=5)
-    
-    # output directory
-    parser.add_argument('--output_directory', type=str,
-                        help='output directory')
-
-    # input image directory
-    parser.add_argument('--base-dir', type=str, help='image directory')
-
-    parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
-    parser.add_argument('--lt-loss', type=float, default=0, help="'long and thin' loss weight")
-
-    parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
-
-    parser.add_argument('--sequence', action='store_true', help='use 019 sequence images')
-    parser.add_argument('--use-examples', action='store_true', help='use preselected examples or all test images')
-
-    args = parser.parse_args()
-    args.cuda = not args.no_cuda and torch.cuda.is_available()
     
     # Define Dataloader
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
@@ -271,16 +226,21 @@ def main():
     foldit_pred_mask = process_foldit(f'/playpen/CEP/results/foldit_public/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
     foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
     foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
-    print(confusion_matrix(label_list, foldit_pred_list))
+    # print(confusion_matrix(label_list, foldit_pred_list))
 
     my_accs = np.zeros(segmentations.shape[0])
     for i in range(len(my_accs)):
         pred_i = pred[i][labels[i]<2].astype(np.uint8)
         label_i = labels[i][labels[i]<2]
-        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True)
+        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True, zero_division=0)
         my_accs[i] = report_i['accuracy']
+        if report_i['Not fold']['recall']==0:
+            print('not fold', i, int(report_i['Not fold']['support']*report_i['Not fold']['recall']))
+        if report_i['Fold']['recall']==0:
+            print('fold', i, int(report_i['Fold']['support']*report_i['Fold']['recall']))
     print(my_accs.mean())
     print(np.std(my_accs))
+    np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'my_accs.npy'), my_accs)
 
     fi_accs = np.zeros(segmentations.shape[0])
     for i in range(len(my_accs)):
@@ -290,9 +250,10 @@ def main():
         fi_accs[i] = report_i['accuracy']
     print(fi_accs.mean())
     print(np.std(fi_accs))
+    np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'fi_accs.npy'), fi_accs)
 
-    plt.boxplot([my_accs, fi_accs])
-    plt.show()
+    # plt.boxplot([my_accs, fi_accs])
+    # plt.show()
 
     my_df = pd.DataFrame(my_report).transpose()
     foldit_df = pd.DataFrame(foldit_report).transpose()
@@ -301,11 +262,13 @@ def main():
     print('\nFoldIt')
     print(foldit_df)
 
-    exit(0)
+    for k1 in ['Not fold', 'Fold']:
+        line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.2f}}}, {foldit_report[k1][k2]:.2f})' for k2 in ['precision', 'recall', 'f1-score']])
+        print(f'{k1} & {line} \\\\ \\hline')
+    print(f'Accuracy & & & (\\textbf{{{my_report["accuracy"]:.2f}}}, {foldit_report["accuracy"]:.2f})')
 
-    for k1 in ['Not ridge', 'Ridge']:
-        line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.4f}}}, {foldit_report[k1][k2]:.4f})' for k2 in ['precision', 'recall', 'f1-score']])
-        print(f'{k1} & {line} \\\\')
+    if not args.figures:
+        return my_accs.mean(), np.std(my_accs), my_report['accuracy']
         
     if args.use_examples:
         im_inds = [0, 1, 2, 3, 7, 14]
@@ -359,13 +322,15 @@ def main():
         ((397,8), (426,71), (0,1,0), 2),
         ((493, 98), (547, 175), (0,1,0), 2),
         ((818, 135), (868, 202), (1,0,0), 2),
-        ((1146, 91), (1207, 213), (1,0,0), 2),
+        ((1246, 91), (1307, 213), (1,0,0), 2),
         ]
-        for r in rois:
-            # grid_o = cv2.rectangle(grid_o.copy(), *r)
-            grid_m = cv2.rectangle(grid_m.copy(), *r)
-            grid_f = cv2.rectangle(grid_f.copy(), *r)
-        #     grid_f2 = cv2.rectangle(grid_f2.copy(), *r)
+        if not args.sequence:
+            for r in rois:
+                # grid_o = cv2.rectangle(grid_o.copy(), *r)
+                grid_m = cv2.rectangle(grid_m.copy(), *r)
+                grid_f = cv2.rectangle(grid_f.copy(), *r)
+            #     grid_f2 = cv2.rectangle(grid_f2.copy(), *r)
+            grid_m = cv2.ellipse(grid_m.copy(), (344, 169), (35, 25), 0, 0, 360, (0.6,0,1), 3)
 
         plt.figure(figsize=(13,6))
         # plt.imshow(np.vstack((grid_o,grid_m,grid_f,grid_f2)))
@@ -373,11 +338,11 @@ def main():
         plt.xticks([])
         plt.yticks([])
         plt.text(-20,216/2, 'Original', fontsize=22, horizontalalignment='right', verticalalignment='center')
-        plt.text(-20, 216*1.5, 'Mine', fontsize=22, horizontalalignment='right', verticalalignment='center')
+        plt.text(-20, 216*1.5, 'Ours', fontsize=22, horizontalalignment='right', verticalalignment='center')
         plt.text(-20, 216*2.5, 'FoldIt', fontsize=22, horizontalalignment='right', verticalalignment='center')
         # plt.text(-20, 216*3.5, 'FoldIt-UNC', fontsize=22, horizontalalignment='right', verticalalignment='center')
 
-        # plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
 
     preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine')
     foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit-internal')
@@ -390,7 +355,73 @@ def main():
         save_preds(images, test_data.images, orig_dir)
 
     plt.show()
-    
+    return None
+
+def find_best(args):
+    means = np.zeros(96)
+    stds = np.zeros(96)
+    accs = np.zeros(96)
+    chkdir = os.path.join(*args.checkpoint.split('/')[:-1])
+
+    for i in range(1,97):
+        args.gpu_ids='0'
+        args.checkpoint = os.path.join(chkdir, f'checkpoint_epoch_{i}.pth.tar')
+        means[i-1], stds[i-1], accs[i-1] = main(args)
+    np.savez(os.path.join(chkdir, 'evals.npz'), means=means, stds=stds, accs=accs)
+
+    plt.errorbar(np.arange(1,97), means, stds, fmt='o')
+    plt.title('Average accuracy at epoch on test set')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean accuracy')
+    plt.show()
 
 if __name__ == "__main__":
-   main()
+    parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Inference")
+    parser.add_argument('--backbone', type=str, default='resnet',
+                        choices=['resnet', 'xception', 'drn', 'mobilenet'],
+                        help='backbone name (default: resnet)')
+    parser.add_argument('--gpu-ids', type=str, default='0',
+                        help='use which gpu to train, must be a \
+                        comma-separated list of integers only (default=0)')
+    parser.add_argument('--workers', type=int, default=4,
+                        metavar='N', help='dataloader threads')
+    parser.add_argument('--n_class', type=int, default=21)
+    parser.add_argument('--crop_size', type=int, default=513,
+                        help='crop image size')
+    parser.add_argument('--no_cuda', action='store_true', default=
+                        False, help='disables CUDA training')
+    # checking point
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='put the path to checkpoint if needed')
+    # rloss options
+    parser.add_argument('--rloss-weight', type=float,
+                        metavar='M', help='densecrf loss')
+    parser.add_argument('--rloss-scale',type=float,default=0.5,
+                        help='scale factor for rloss input, choose small number for efficiency, domain: (0,1]')
+    parser.add_argument('--sigma-rgb',type=float,default=15.0,
+                        help='DenseCRF sigma_rgb')
+    parser.add_argument('--sigma-xy',type=float,default=80.0,
+                        help='DenseCRF sigma_xy')
+    parser.add_argument('--batch-size', type=int, default=5)
+    
+    # output directory
+    parser.add_argument('--output_directory', type=str,
+                        help='output directory')
+
+    # input image directory
+    parser.add_argument('--base-dir', type=str, help='image directory')
+
+    parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
+    parser.add_argument('--lt-loss', type=float, default=0, help="'long and thin' loss weight")
+
+    parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
+
+    parser.add_argument('--sequence', action='store_true', help='use 019 sequence images')
+    parser.add_argument('--use-examples', action='store_true', help='use preselected examples or all test images')
+    parser.add_argument('--figures', action='store_true', help='generate figures')
+
+    args = parser.parse_args()
+    args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    main(args)
+    # find_best(args)

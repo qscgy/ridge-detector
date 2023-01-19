@@ -44,7 +44,7 @@ class PAM(nn.Module):
 # Adapted from Meng Tang et al. (2018)
 class DeepBoundary(nn.Module):
     def __init__(self, backbone='resnet', output_stride=16, num_classes=21,
-                 sync_bn=True, freeze_bn=False, boundary=False, in_channels=3, rw=False):
+                 sync_bn=True, freeze_bn=False, boundary=False, in_channels=3, rw=False, byp=False):
         super(DeepBoundary, self).__init__()
         if backbone == 'drn':
             output_stride = 8
@@ -56,8 +56,9 @@ class DeepBoundary(nn.Module):
         
         self.boundary = boundary
         self.rw = rw    # Random walks
+        self.byp = byp  # Depths bypass mobilenet
 
-        self.backbone = build_backbone(backbone, output_stride, BatchNorm, in_channels=in_channels)
+        self.backbone = build_backbone(backbone, output_stride, BatchNorm, in_channels=in_channels if not byp else 3)
         self.aspp = build_aspp(backbone, output_stride, BatchNorm)
         self.decoder = build_decoder(num_classes, backbone, BatchNorm)
 
