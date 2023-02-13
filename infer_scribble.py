@@ -38,14 +38,26 @@ from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 global grad_seg
 
 class FixedImageDataset(Dataset):
-    def __init__(self, crop_size, in_channels=3, gt=False, process=True):
+    '''
+    A class to represent an image dataset whose contents are defined by the user. This class is used at inference time
+    to allow for implementation of preprocessing separate from the preprocessing applied to training data in FoldSegmentation.
+
+    Arguments:
+        base_dir (str): base directory for annotations
+        crop_size (int): the side length to which images will be resized (as a square)
+        in_channels (int): the number of input channels to the network. 3 for images only, 4 for images+depths, 6 for images+normals.
+        gt (bool): Whether to look for ground-truth labels. Should be True generally.
+        process (bool): whether to apply file preprocessing.
+        normal_paths (List[str]): paths to normals, only for in_channels=6
+    '''
+    def __init__(self, base_dir, crop_size, in_channels=3, gt=False, process=True, normal_paths=None):
         super().__init__()
-        # self.images = glob.glob(os.path.join(root, '*.jpg'))[:25]
-        # print(self.images)
-        # self.images = ['/playpen/Datasets/scribble-test/testA/011_frame014577.jpg', '/playpen/Datasets/scribble-test/testA/061_frame008798.jpg', '/playpen/Datasets/scribble-test/testA/030_frame021700.jpg', '/playpen/Datasets/scribble-test/testA/036_frame028843.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037529.jpg', '/playpen/Datasets/scribble-test/testA/015_frame017096.jpg', '/playpen/Datasets/scribble-test/testA/028_frame020968.jpg', '/playpen/Datasets/scribble-test/testA/047_frame013507.jpg', '/playpen/Datasets/scribble-test/testA/022_frame021904.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov12_13-56-23_001_frame024463.jpg', '/playpen/Datasets/scribble-test/testA/059_frame008342.jpg', '/playpen/Datasets/scribble-test/testA/066_frame016078.jpg', '/playpen/Datasets/scribble-test/testA/008_frame033659.jpg', '/playpen/Datasets/scribble-test/testA/007_frame014436.jpg', '/playpen/Datasets/scribble-test/testA/008_frame034035.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026291.jpg', '/playpen/Datasets/scribble-test/testA/011_frame014067.jpg', '/playpen/Datasets/scribble-test/testA/058_frame159460.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Oct18_13-33-20_002_frame033516.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Feb08_12-20-44_001_frame007594.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007386.jpg', '/playpen/Datasets/scribble-test/testA/039_frame007252.jpg', '/playpen/Datasets/scribble-test/testA/060_frame026260.jpg', '/playpen/Datasets/scribble-test/testA/005_frame053501.jpg', '/playpen/Datasets/scribble-test/testA/Auto_A_Nov01_11-50-02_001_frame037552.jpg']
+       
+        self.normal_paths = normal_paths
+        self.base_dir = base_dir
         self.process = process
         if process:
-            with open('test_set.pkl', 'rb') as f:
+            with open(os.path.join(base_dir,'test_set.pkl'), 'rb') as f:
                 self.images = pickle.load(f)
         else:
             with open('annotations_019.pkl', 'rb') as f:
@@ -53,18 +65,15 @@ class FixedImageDataset(Dataset):
         self.images = natsorted(self.images)
         self.depths = None
 
+        # Use depths
         if in_channels == 4:
             if not process:
+                # This was only used for demonstrating consistency over consecutive frames, in the paper.
                 self.depths = [os.path.join('/playpen/Datasets/geodepth2/019/colon_norm_preall_abs_nosm', l.split('/')[-1].split('.')[0]+'_disp.npy') for l in self.images]
             else:
                 self.depths = [get_depth_from_image(l) for l in self.images]
 
-                # for i in range(len(self.depths)):
-                #     fname = self.depths[i]
-                #     path = fname.split('/')
-                #     rdir = ('/' if fname[0]=='/' else '') + os.path.join(*path[:-3], 'geodepth2')
-                #     ddir = '_'.join(path[-1].split('_')[:-2])
-                #     self.depths[i] = os.path.join(rdir, ddir, 'colon_norm_preall_abs_nosm', path[-1][len(ddir)+1:])
+        # Use normals
         if in_channels==6:
             with open('normal_paths_test.pkl', 'rb') as f:
                 self.normal_paths = pickle.load(f)
@@ -72,13 +81,14 @@ class FixedImageDataset(Dataset):
         self.labels = None
         if gt:
             label_file = 'annotations_test.pkl' if process else 'annotations_019.pkl'
-            with open(label_file, 'rb') as f:
+            with open(os.path.join(base_dir, label_file), 'rb') as f:
                 in_labels = pickle.load(f)
             
             if not process:
                 self.labels = in_labels
             else:
                 # translate file names between the one used for the key and the image name in test_set.pkl (###/img_corr)
+                # see the comment in __getitem__ for further details.
                 self.labels = {}
                 for k in in_labels:
                     path = k.split('/')[-1]
@@ -103,6 +113,10 @@ class FixedImageDataset(Dataset):
     def __getitem__(self, index):
         im_name = self.images[index]
         if self.process:
+            # The keys for the annotation dictionary are image files in the img_corr directories produced by LightAdjust.
+            # However, the actual network was trained on uncorrected images (`image` directory), and I have been testing with those,
+            # although there does not seem to be much differece.
+            # This line exists in order to ensure that the images passed to the network are from the `image` directory.
             im = Image.open(im_name.replace('img_corr', 'image'))
         else:
             im = Image.open(im_name)
@@ -111,8 +125,6 @@ class FixedImageDataset(Dataset):
         if self.depths:
             depth = Image.fromarray(np.load(self.depths[index]))
             depth = self.depth_transform(depth)
-            # print(depth.shape)
-            # print(ims.shape)
             ims = torch.cat((ims, depth), 0)
         
         if self.normal_paths:
@@ -138,6 +150,9 @@ class FixedImageDataset(Dataset):
         return ims
 
 def process_foldit(results_dir, size):
+    '''
+    Extracts binary predictions from FoldIt outputs.
+    '''
     foldit_ims = glob.glob(os.path.join(results_dir, '*.png'))
     foldit_ims = natsorted(foldit_ims)
     pred = [f for f in foldit_ims if 'fake_B' in f]
@@ -149,15 +164,16 @@ def process_foldit(results_dir, size):
         images[i] = (im[...,1]==0) & (im[...,2]==0)
     return images
 
+
 def save_preds(preds, images, save_dir):
+    '''
+    Save predicted images if not already saved.
+    '''
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
         for i in range(preds.shape[0]):
             im = cv2.cvtColor(preds[i].transpose(1,2,0)*255, cv2.COLOR_RGB2BGR)
-            # cv2.imshow(' ', im)
-            # cv2.waitKey(0)
             path = images[i].split('/')
-            # print(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'))
             cv2.imwrite(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'), im)
 
 def postprocess(preds):
@@ -167,8 +183,6 @@ def postprocess(preds):
         nblobs, labels, stats, _ = cv2.connectedComponentsWithStats(pred, connectivity=4)
 
 def main(args):
-
-    
     # Define Dataloader
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
     
@@ -206,21 +220,24 @@ def main(args):
     model.eval()
 
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
-    test_data = FixedImageDataset(crop_size=args.crop_size, in_channels=args.in_chan, gt=True, process=not args.sequence)
+    test_data = FixedImageDataset(args.base_dir, crop_size=args.crop_size, in_channels=args.in_chan, gt=args.gt, process=not args.sequence)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
     softmax = nn.Softmax(dim=1)
     labels = torch.zeros_like(segmentations)
 
-    for i, (image, label) in enumerate(test_loader):
-        labels[i] = label
+    for i, data in enumerate(test_loader):
+        if args.gt:
+            image, label = data
+            labels[i] = label
+        else:
+            image = data
         if not args.no_cuda:
             image = image.cuda()
         output = model(image)
         probs = softmax(output)
         segmentations[i] = probs[:,1].detach().cpu()
-        # images[i] = unnorm.detach().cpu()
         images[i] = denormalizeimage(image[:,:3], MEAN, STDEV)/255.0
 
     segmentations = segmentations.reshape(segmentations.shape[0]*segmentations.shape[1], *segmentations.shape[2:]).numpy()
@@ -229,53 +246,57 @@ def main(args):
     thresh = 0.3    # TODO this is important! Dropping thresh to 0.3 from 0.5 improves accuracy!
     pred = (segmentations > thresh)
 
-    # compute metrics
-    pred_list = pred[labels<2].astype(np.uint8)
-    label_list = labels[labels<2]
-    my_report = classification_report(label_list, pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
-    foldit_pred_mask = process_foldit(f'/playpen/CEP/results/foldit_public/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
-    foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
-    foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
-    # print(confusion_matrix(label_list, foldit_pred_list))
+    if args.gt:
+        # compute metrics
+        pred_list = pred[labels<2].astype(np.uint8)
+        label_list = labels[labels<2]
+        my_report = classification_report(label_list, pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
 
-    my_accs = np.zeros(segmentations.shape[0])
-    for i in range(len(my_accs)):
-        pred_i = pred[i][labels[i]<2].astype(np.uint8)
-        label_i = labels[i][labels[i]<2]
-        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True, zero_division=0)
-        my_accs[i] = report_i['accuracy']
-        if report_i['Not fold']['recall']==0:
-            print('not fold', i, int(report_i['Not fold']['support']*report_i['Not fold']['recall']))
-        if report_i['Fold']['recall']==0:
-            print('fold', i, int(report_i['Fold']['support']*report_i['Fold']['recall']))
-    print(my_accs.mean())
-    print(np.std(my_accs))
-    np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'my_accs.npy'), my_accs)
+        foldit_pred_mask = process_foldit(args.foldit_dir, (args.crop_size, args.crop_size))
+        foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
+        foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
 
-    fi_accs = np.zeros(segmentations.shape[0])
-    for i in range(len(my_accs)):
-        pred_i = foldit_pred_mask[i][labels[i]<2].astype(np.uint8)
-        label_i = labels[i][labels[i]<2]
-        report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True)
-        fi_accs[i] = report_i['accuracy']
-    print(fi_accs.mean())
-    print(np.std(fi_accs))
-    np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'fi_accs.npy'), fi_accs)
+        my_accs = np.zeros(segmentations.shape[0])
+        for i in range(len(my_accs)):
+            pred_i = pred[i][labels[i]<2].astype(np.uint8)
+            label_i = labels[i][labels[i]<2]
+            report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True, zero_division=0)
+            my_accs[i] = report_i['accuracy']
+            if report_i['Not fold']['recall']==0:
+                print('not fold', i, int(report_i['Not fold']['support']*report_i['Not fold']['recall']))
+            if report_i['Fold']['recall']==0:
+                print('fold', i, int(report_i['Fold']['support']*report_i['Fold']['recall']))
+        
+        #Print LaTeX-formatted tables of results
+        print(my_accs.mean())
+        print(np.std(my_accs))
+        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'my_accs.npy'), my_accs)
 
-    # plt.boxplot([my_accs, fi_accs])
-    # plt.show()
+        fi_accs = np.zeros(segmentations.shape[0])
+        for i in range(len(my_accs)):
+            pred_i = foldit_pred_mask[i][labels[i]<2].astype(np.uint8)
+            label_i = labels[i][labels[i]<2]
+            report_i = classification_report(label_i, pred_i, target_names=['Not fold', 'Fold'], output_dict=True)
+            fi_accs[i] = report_i['accuracy']
+        print(fi_accs.mean())
+        print(np.std(fi_accs))
+        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'fi_accs.npy'), fi_accs)
 
-    my_df = pd.DataFrame(my_report).transpose()
-    foldit_df = pd.DataFrame(foldit_report).transpose()
-    print('Mine')
-    print(my_df)
-    print('\nFoldIt')
-    print(foldit_df)
+        # Box plot of results, optional
+        # plt.boxplot([my_accs, fi_accs])
+        # plt.show()
 
-    for k1 in ['Not fold', 'Fold']:
-        line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.2f}}}, {foldit_report[k1][k2]:.2f})' for k2 in ['precision', 'recall', 'f1-score']])
-        print(f'{k1} & {line} \\\\ \\hline')
-    print(f'Accuracy & & & (\\textbf{{{my_report["accuracy"]:.2f}}}, {foldit_report["accuracy"]:.2f})')
+        my_df = pd.DataFrame(my_report).transpose()
+        foldit_df = pd.DataFrame(foldit_report).transpose()
+        print('Mine')
+        print(my_df)
+        print('\nFoldIt')
+        print(foldit_df)
+
+        for k1 in ['Not fold', 'Fold']:
+            line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.2f}}}, {foldit_report[k1][k2]:.2f})' for k2 in ['precision', 'recall', 'f1-score']])
+            print(f'{k1} & {line} \\\\ \\hline')
+        print(f'Accuracy & & & (\\textbf{{{my_report["accuracy"]:.2f}}}, {foldit_report["accuracy"]:.2f})')
 
     if not args.figures:
         return my_accs.mean(), np.std(my_accs), my_report['accuracy']
@@ -290,7 +311,7 @@ def main(args):
         ncol = int(np.sqrt(len(im_inds)))
 
     # Visualize prediction
-    fig, ax = plt.subplots(1, 3, figsize=(20, 7))
+    fig, ax = plt.subplots(1, 3 if args.gt else 2, figsize=(20, 7))
     plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
     grid_o = make_grid(torch.from_numpy(images[im_inds]), ncol).numpy().transpose(1,2,0)
     ax[0].imshow(grid_o)
@@ -305,17 +326,19 @@ def main(args):
     ax[1].set_title('Fold predictions in green')
     ax[1].axis('off')
 
-    foldit_preds = np.copy(images).transpose(1,0,2,3)
-    foldit_preds[0][foldit_pred_mask] = 0
-    foldit_preds = foldit_preds.transpose(1, 0, 2, 3)
-    grid_f = make_grid(torch.from_numpy(foldit_preds[im_inds]), ncol).numpy().transpose(1,2,0)
-    ax[2].imshow(grid_f)
-    ax[2].set_title('Foldit predictions')
-    ax[2].axis('off')
+    if args.gt:
+        foldit_preds = np.copy(images).transpose(1,0,2,3)
+        foldit_preds[0][foldit_pred_mask] = 0
+        foldit_preds = foldit_preds.transpose(1, 0, 2, 3)
+        grid_f = make_grid(torch.from_numpy(foldit_preds[im_inds]), ncol).numpy().transpose(1,2,0)
+        ax[2].imshow(grid_f)
+        ax[2].set_title('Foldit predictions')
+        ax[2].axis('off')
 
     plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
     # plt.close()
     
+    # Examples for the paper.
     if args.use_examples:
         foldit_pred_mask_2 = process_foldit(f'/playpen/CEP/results/foldit_internal/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
         foldit_pred_list_2 = foldit_pred_mask[labels<2].astype(np.uint8)
@@ -359,7 +382,7 @@ def main(args):
     orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original')
     if not os.path.isdir(preds_dir):
         save_preds(my_preds, test_data.images, preds_dir)
-    if not os.path.isdir(foldit_dir):
+    if args.gt and not os.path.isdir(foldit_dir):
         save_preds(foldit_preds, test_data.images, foldit_dir)
     if not os.path.isdir(orig_dir):
         save_preds(images, test_data.images, orig_dir)
@@ -420,6 +443,10 @@ if __name__ == "__main__":
 
     # input image directory
     parser.add_argument('--base-dir', type=str, help='image directory')
+
+    parser.add_argument('--gt', action='store_true', help='use ground truth labels')
+
+    parser.add_argument('--foldit-dir', type=str, help='path to foldit results')
 
     parser.add_argument('--bd-loss', type=float, default=0, help='boundary loss weight, or 0 to ignore')
     parser.add_argument('--lt-loss', type=float, default=0, help="'long and thin' loss weight")

@@ -16,6 +16,15 @@ MEAN = [0.485, 0.456, 0.406]
 STDEV = [0.229, 0.224, 0.225]
 
 def make_data_loader(*args, **kwargs):
+    '''
+    Construct DataLoaders for training and validation.
+
+    Returns:
+        (DataLoader): train DataLoader
+        (DataLoader): validation DataLoader
+        (NoneType): test DataLoader, not implemented
+        (int): number of classes
+    '''
     instance = ('instance' in kwargs and kwargs['instance']==True)
     train_set = FoldSegmentation(args, split='train', instance=instance)
     val_set = FoldSegmentation(args, split='val', instance=instance)
@@ -28,10 +37,19 @@ def make_data_loader(*args, **kwargs):
 
     return train_loader, val_loader, test_loader, num_class
 
-def get_depth_from_image(fname):
+def get_depth_from_image(fname, model_name='colon_norm_preall_abs_nosm'):
+    '''
+    Find the ColDE depth maps for a given image.
+    
+    Arguments:
+        fname (str): image file name
+        modle_name (str): ColDE model name; should be the folder where ColDE outputs depth predictions in the sequence folder.
+    Returns:
+        (str): file name of depth map
+    '''
     path = fname.split('/')
     frame = path[-1].split('.')[0]
-    depth = os.path.join(*path[:-2], 'colon_norm_preall_abs_nosm', f'{frame}_disp.npy')
+    depth = os.path.join(*path[:-2], model_name, f'{frame}_disp.npy')
     if fname[0]=='/':
         depth = '/'+depth
     return depth
@@ -52,6 +70,16 @@ def get_normals_from_image(fname):
     return normals
 
 class FoldSegmentation(Dataset):
+    '''
+    A class to represent a dataset of labeled colon images for training and validation.
+
+    Arguments:
+        _args (argparse.Namespace): command-line args passed to train_scribble.py
+        split (str): the dataset splt. Must be 'train' or 'val'.
+        fstroke (int): desired stroke width of fold scribbles, in pixels.
+        bstroke (int): desired stroke width of not-fold scribbles, in pixels.
+        instance (bool): is instance segmenation. Not implemented.
+    '''
     NUM_CLASSES = 2
     def __init__(
         self,
@@ -87,16 +115,6 @@ class FoldSegmentation(Dataset):
             with open('normal_paths.pkl', 'rb') as f:
                 self.normal_paths = pickle.load(f)
 
-        # if self.args.in_chan==4:
-        #     self.depths = [get_depth_from_image(l) for l in self.images]
-        # else:
-        #     self.depths = None
-        
-        # if self.args.in_chan==6:
-        #     self.normals = [get_normals_from_image(l) for l in self.images]
-        # else:
-        #     self.normals = None
-
         if self.split=='train':
             self.perm = self.perm[:int(0.9*len(self.perm))]
         elif self.split=='val':
@@ -111,7 +129,11 @@ class FoldSegmentation(Dataset):
     
     def __getitem__(self, index):
         im_name = self.images[self.perm[index]]
+
+        # Replacing keys. See the comment in FixedImageDataset.__getitem__ for details.
         im = Image.open(im_name.replace('img_corr', 'image'))
+
+        # Draw labels to create label mask.
         fg_labels, bg_labels = self.labels[im_name]
         labels = np.ones((432, 540, 3))*255
         for i, l in enumerate(fg_labels):

@@ -8,18 +8,19 @@ import copy
 import pickle
 import random
 import shutil
-import sys
+
+sequence_dir = '/playpen/Datasets/geodepth2'
+dump_file = 'annotations.pkl'
 
 def get_all_images(base_dir):
     im_dirs = os.listdir(base_dir)
     im_dirs = natsorted(im_dirs)
-    # im_dirs = ['']
     images = []
     for d in im_dirs:
-        # path = os.path.join(base_dir, d, 'img_corr')
-        path = base_dir
+        path = os.path.join(base_dir, d, 'img_corr')
         if os.path.isdir(path):
             images.extend(natsorted([os.path.join(path, i) for i in os.listdir(path)]))
+    print(images[0])
     return images
 
 def copy_random_sample(files, dst, n=200):
@@ -29,14 +30,9 @@ def copy_random_sample(files, dst, n=200):
         im_dir = im.split('/')[-3]
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
-base_dir = '/playpen/Datasets/our-019-their-ma1'
-
-# all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
-# copy_random_sample(all_images, 200)
-
 class ScribbleAnnotator:
     def __init__(self, start=0):
-        self.all_images = get_all_images(base_dir)
+        self.all_images = get_all_images(sequence_dir)[::5]
         print(f'Number of image files: {len(self.all_images)}')
         self.points = ([],[])
         self.drawing = False
@@ -45,24 +41,11 @@ class ScribbleAnnotator:
         self.idx = start
 
         self.annotations = {}
-        self.dump_file = 'annotations_019.pkl'
+        self.dump_file = dump_file
         if os.path.isfile(self.dump_file):
             with open(self.dump_file, 'rb') as f:
                 self.annotations = pickle.load(f)
                 
-        # tmp_dc = {}
-        # for k in self.annotations:
-        #     if isinstance(self.annotations[k], list):
-        #         tmp_dc[k] = (self.annotations[k], [])
-        #     elif len(self.annotations[k][0]) > 0 or len(self.annotations[k][1]) > 0:
-        #         tmp_dc[k] = self.annotations[k]
-        # self.annotations = tmp_dc
-        
-        # if start_0 or len(self.annotations.keys())==0:
-        #     pass
-        # else:
-        #     ann_keys = natsorted(self.annotations.keys())
-        #     self.idx = self.all_images.index(ann_keys[-1])
         self.load_img()
 
         self.load_points()
@@ -80,7 +63,6 @@ class ScribbleAnnotator:
             self.points[self.label].append([[self.ix, self.iy]])   # start drawing
         elif event == cv2.EVENT_MOUSEMOVE:
             if self.drawing:
-                # cv2.circle(img, (x,y), 5, (0,0,255), -1)
                 cv2.line(self.img, (self.ix, self.iy), (x, y), (255,0,0), 2)
                 self.points[self.label][-1].append([x, y])
                 self.ix, self.iy = x, y
@@ -100,7 +82,7 @@ class ScribbleAnnotator:
             cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (255,0,0), 2)
 
     def load_img(self):
-        # print(self.all_images[self.idx])
+        print(self.all_images[self.idx])
         self.img = cv2.resize(cv2.imread(self.all_images[self.idx]), (540, 432))
         # self.img = cv2.putText(self.img, self.all_images[self.idx].split('/')[-1],
         #                     (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
