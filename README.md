@@ -24,7 +24,7 @@ pyyaml==6.0
 ```
 
 ## Directory structure
-There are two separate directories you will need. The first is the sequence directory, which contains all colonoscopy sequences and the ColDE outputs (each in a separate directory). This is assigned to the variable `sequence_dir` in `scribble.py`. Using the ColDE model `colon_norm_preall_abs_nosm`, mine looks like this:
+There are two separate directories you will need. The first is the sequence directory, which contains all colonoscopy sequences and the ColDE outputs (each in a separate directory). The relative paths from this directory are the keys in all annotation files. This is assigned to the variable `sequence_dir` in `scribble.py`. Using the ColDE model `colon_norm_preall_abs_nosm`, mine looks like this:
 ```
 /playpen/Datasets/geodepth2
 ├── 000
