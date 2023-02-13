@@ -36,6 +36,21 @@ def get_depth_from_image(fname):
         depth = '/'+depth
     return depth
 
+def frame_num_to_index(fpath, frame):
+    img_dir = os.path.dirname(fpath)
+    zero_frame = int(natsorted(os.listdir(img_dir))[0][5:11])
+    return frame-zero_frame
+
+def get_normals_from_image(fname):
+    path = fname.split('/')
+    frame = int(path[-1].split('.')[0][5:])
+    index = frame_num_to_index(fname, frame)
+    num = path[-3]
+    normals = os.path.join(*path[:-2], 'NFPS', 'images', f'{num}_{index:03d}', f'{num}_{index:03d}_nr_pred.npy')
+    if fname[0]=='/':
+        normals = '/'+normals
+    return normals
+
 class FoldSegmentation(Dataset):
     NUM_CLASSES = 2
     def __init__(
@@ -68,10 +83,19 @@ class FoldSegmentation(Dataset):
         self.perm = list(range(len(self.images)))   # random permutation of images and depths
         random.shuffle(self.perm)
 
-        if self.args.in_chan==4:
-            self.depths = [get_depth_from_image(l) for l in self.images]
-        else:
-            self.depths = None
+        if self.args.in_chan==6:
+            with open('normal_paths.pkl', 'rb') as f:
+                self.normal_paths = pickle.load(f)
+
+        # if self.args.in_chan==4:
+        #     self.depths = [get_depth_from_image(l) for l in self.images]
+        # else:
+        #     self.depths = None
+        
+        # if self.args.in_chan==6:
+        #     self.normals = [get_normals_from_image(l) for l in self.images]
+        # else:
+        #     self.normals = None
 
         if self.split=='train':
             self.perm = self.perm[:int(0.9*len(self.perm))]
@@ -105,15 +129,18 @@ class FoldSegmentation(Dataset):
             sample = im
         else:
             sample = {'image':im, 'label':Image.fromarray(labels)}
-            if self.depths is not None:
+            if self.args.in_chan==4:
                 # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
                 depth_arr = np.load(get_depth_from_image(im_name))
                 sample['depth'] = Image.fromarray(depth_arr)
                 # print(depth_arr.min(), depth_arr.max())
-
+            if self.args.in_chan==6:
+                normal_arr = np.load(self.normal_paths[im_name])
+                sample['normal'] = normal_arr
+            
         if self.split == "train":
             return self.transform_tr(sample)
-        elif self.split == 'val':
+        else:
             return self.transform_val(sample)
 
     def transform_tr(self, sample):

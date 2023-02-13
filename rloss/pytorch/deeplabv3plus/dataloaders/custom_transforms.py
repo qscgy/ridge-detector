@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 
 from PIL import Image, ImageOps, ImageFilter
+from scipy.ndimage import zoom
 
 class Normalize(object):
     """Normalize a tensor image with mean and standard deviation.
@@ -19,6 +20,7 @@ class Normalize(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
 
         img = np.array(img).astype(np.float32)
         mask = np.array(mask).astype(np.float32)
@@ -30,6 +32,8 @@ class Normalize(object):
                 'label': mask}
         if depth:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 class NormalizeImage(object):
@@ -61,6 +65,7 @@ class ToTensor(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
 
         img = np.array(img).astype(np.float32).transpose((2, 0, 1))
         mask = np.array(mask).astype(np.float32)
@@ -70,11 +75,16 @@ class ToTensor(object):
         if depth:
             depth = torch.from_numpy(np.array(depth).astype(np.float32))
             depth.unsqueeze_(0)
+        if normal is not None:
+            normal = torch.from_numpy(normal)
+            normal = torch.permute(normal, (2, 0, 1))
 
         out = {'image': img,
                 'label': mask}
         if depth is not None:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 class ToTensorImage(object):
@@ -93,16 +103,21 @@ class RandomHorizontalFlip(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
         if random.random() < 0.5:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
             if 'depth' in sample:
                 depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
-
+            if 'normal' in sample:
+                # normal = normal.transpose(Image.FLIP_LEFT_RIGHT)
+                normal = np.fliplr(normal)
         out = {'image': img,
                 'label': mask}
         if depth:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 
@@ -126,6 +141,7 @@ class RandomGaussianBlur(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
 
         if random.random() < 0.5:
             img = img.filter(ImageFilter.GaussianBlur(
@@ -135,6 +151,8 @@ class RandomGaussianBlur(object):
                 'label': mask}
         if depth:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 
@@ -154,6 +172,7 @@ class RandomScaleCrop(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
         # random scale (short edge)
         short_size = random.randint(int(self.base_size * 0.5), int(self.base_size * 2.0))
         w, h = img.size
@@ -167,6 +186,9 @@ class RandomScaleCrop(object):
         mask = mask.resize((ow, oh), Image.NEAREST)
         if depth:
             depth = depth.resize((ow, oh), Image.BILINEAR)
+        if normal is not None:
+            # normal = normal.resize((ow, oh), Image.BILINEAR)
+            normal = zoom(normal, (oh*1.0/h, ow*1.0/w, 1), order=1)
         # pad crop
         if short_size < self.crop_size:
             padh = self.crop_size - oh if oh < self.crop_size else 0
@@ -175,6 +197,9 @@ class RandomScaleCrop(object):
             mask = ImageOps.expand(mask, border=(0, 0, padw, padh), fill=self.fill)
             if depth:
                 depth = ImageOps.expand(depth, border=(0, 0, padw, padh), fill=0)
+            if normal is not None:
+                # normal = ImageOps.expand(normal, border=(0, 0, padw , padh), fill=self.fill)
+                normal = np.pad(normal, ((0, padh), (0, padw), (0,0)), mode='constant', constant_values=0)
         # random crop crop_size
         w, h = img.size
         x1 = random.randint(0, w - self.crop_size)
@@ -183,11 +208,16 @@ class RandomScaleCrop(object):
         mask = mask.crop((x1, y1, x1 + self.crop_size, y1 + self.crop_size))
         if depth:
             depth = depth.crop((x1, y1, x1 + self.crop_size, y1 + self.crop_size))
+        if normal is not None:
+            # normal = normal.crop((x1, y1, x1 + self.crop_size, y1 + self.crop_size))
+            normal = normal[y1:y1+self.crop_size,x1:x1+self.crop_size]
 
         out = {'image': img,
                 'label': mask}
         if depth:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 
@@ -199,6 +229,7 @@ class FixScaleCrop(object):
         img = sample['image']
         mask = sample['label']
         depth = sample['depth'] if 'depth' in sample else None
+        normal = sample['normal'] if 'normal' in sample else None
 
         w, h = img.size
         if w > h:
@@ -211,6 +242,8 @@ class FixScaleCrop(object):
         mask = mask.resize((ow, oh), Image.NEAREST)
         if depth:
             depth = depth.resize((ow, oh), Image.BILINEAR)
+        if normal is not None:
+            normal = zoom(normal, (oh*1.0/h, ow*1.0/w, 1), order=1)
         # center crop
         w, h = img.size
         x1 = int(round((w - self.crop_size) / 2.))
@@ -219,11 +252,15 @@ class FixScaleCrop(object):
         mask = mask.crop((x1, y1, x1 + self.crop_size, y1 + self.crop_size))
         if depth:
             depth = depth.crop((x1, y1, x1 + self.crop_size, y1 + self.crop_size))
+        if normal is not None:
+            normal = normal[y1:y1+self.crop_size,x1:x1+self.crop_size]
 
         out = {'image': img,
                 'label': mask}
         if depth:
             out['depth'] = depth
+        if normal is not None:
+            out['normal'] = normal
         return out
 
 class FixScaleCropImage(object):

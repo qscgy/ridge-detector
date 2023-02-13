@@ -132,9 +132,11 @@ class Trainer(object):
         softmax = nn.Softmax(dim=1)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
-            if self.args.in_chan != 3:
-                depth = sample['depth']
-                image = torch.cat((image, depth), 1)
+            if self.args.in_chan == 4:
+                aux = sample['depth']
+            elif self.args.in_chan==6:
+                aux = sample['normal']
+            image = torch.cat((image, aux), 1)
             croppings = (target!=254).float()
             target[target==254]=255
             # Pixels labeled 255 are those unlabeled pixels. Padded region are labeled 254.
@@ -231,9 +233,11 @@ class Trainer(object):
         test_loss = 0.0
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
-            if self.args.in_chan != 3:
-                depth = sample['depth']
-                image = torch.cat((image, depth), 1)
+            if self.args.in_chan == 4:
+                aux = sample['depth']
+            elif self.args.in_chan==6:
+                aux = sample['normal']
+            image = torch.cat((image, aux), 1)
             target[target==254]=255
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()

@@ -12,6 +12,7 @@ from torchvision import transforms
 from torchvision.utils import make_grid
 from torchvision.datasets import ImageFolder
 from torch.autograd import Variable
+import torch.nn.functional as F
 from os.path import join, isdir
 from models.deepboundary import DeepBoundary
 import cv2
@@ -52,7 +53,7 @@ class FixedImageDataset(Dataset):
         self.images = natsorted(self.images)
         self.depths = None
 
-        if in_channels > 3:
+        if in_channels == 4:
             if not process:
                 self.depths = [os.path.join('/playpen/Datasets/geodepth2/019/colon_norm_preall_abs_nosm', l.split('/')[-1].split('.')[0]+'_disp.npy') for l in self.images]
             else:
@@ -64,6 +65,9 @@ class FixedImageDataset(Dataset):
                 #     rdir = ('/' if fname[0]=='/' else '') + os.path.join(*path[:-3], 'geodepth2')
                 #     ddir = '_'.join(path[-1].split('_')[:-2])
                 #     self.depths[i] = os.path.join(rdir, ddir, 'colon_norm_preall_abs_nosm', path[-1][len(ddir)+1:])
+        if in_channels==6:
+            with open('normal_paths_test.pkl', 'rb') as f:
+                self.normal_paths = pickle.load(f)
 
         self.labels = None
         if gt:
@@ -110,6 +114,12 @@ class FixedImageDataset(Dataset):
             # print(depth.shape)
             # print(ims.shape)
             ims = torch.cat((ims, depth), 0)
+        
+        if self.normal_paths:
+            normal = np.load(self.normal_paths[im_name])
+            normal = transforms.ToTensor()(normal)
+            normal = F.interpolate(normal, size=self.crop_size)
+            ims = torch.cat((ims, normal), 0)
         
         if self.labels:
             fg_labels, bg_labels = self.labels[im_name]
