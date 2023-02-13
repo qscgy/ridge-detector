@@ -96,7 +96,7 @@ class FoldSegmentation(Dataset):
         else:
             self.args = _args
         self.base_dir = self.args.base_dir
-        self.scribble_dir = os.path.join(self.base_dir, 'annotations')
+        self.scribble_dir = self.base_dir
         self.split = split
         self.fstroke = fstroke
         self.bstroke = bstroke
@@ -107,6 +107,7 @@ class FoldSegmentation(Dataset):
             self.labels = pickle.load(f)
 
         self.images = list(self.labels.keys())
+        # self.images = [os.path.join(self.args.sequence_dir, i) for i in self.images]
 
         self.perm = list(range(len(self.images)))   # random permutation of images and depths
         random.shuffle(self.perm)
@@ -129,9 +130,14 @@ class FoldSegmentation(Dataset):
     
     def __getitem__(self, index):
         im_name = self.images[self.perm[index]]
+        abs_im_name = os.path.join(self.args.sequence_dir, im_name)
 
-        # Replacing keys. See the comment in FixedImageDataset.__getitem__ for details.
-        im = Image.open(im_name.replace('img_corr', 'image'))
+        # The keys for the annotation dictionary are image files in the img_corr directories produced by LightAdjust.
+        # However, the actual network was trained on uncorrected images (`image` directory), and I have been testing with those,
+        # although there does not seem to be much differece.
+        # This line exists in order to ensure that the images passed to the network are from the `image` directory.
+        # im = Image.open(im_name.replace('img_corr', 'image'))
+        im = Image.open(abs_im_name)
 
         # Draw labels to create label mask.
         fg_labels, bg_labels = self.labels[im_name]
@@ -153,7 +159,7 @@ class FoldSegmentation(Dataset):
             sample = {'image':im, 'label':Image.fromarray(labels)}
             if self.args.in_chan==4:
                 # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
-                depth_arr = np.load(get_depth_from_image(im_name))
+                depth_arr = np.load(get_depth_from_image(abs_im_name))
                 sample['depth'] = Image.fromarray(depth_arr)
                 # print(depth_arr.min(), depth_arr.max())
             if self.args.in_chan==6:

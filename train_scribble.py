@@ -379,6 +379,8 @@ def main():
 
     parser.add_argument('--rw', action='store_true', default=False, help='use random walks (do not use!)')
 
+    parser.add_argument('--sequence-dir', type=str, help='directory of colonoscopy sequences')
+
     args = parser.parse_args()
     
     args.cuda = not args.no_cuda and torch.cuda.is_available()

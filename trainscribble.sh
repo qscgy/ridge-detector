@@ -33,7 +33,8 @@
 
 CUDA_VISIBLE_DEVICES=0 python train_scribble.py \
     --backbone mobilenet --lr 0.007 --workers 4 \
-    --base-dir /playpen/Datasets/scribble-samples/ \
+    --base-dir /playpen/Datasets/scribble-samples/annotations/ \
+    --sequence-dir /playpen/Datasets/geodepth2/ \
     --epochs 96 --batch-size 12  --out-stride 16 \
     --checkname mobilenet-4 --eval-interval 1 \
     --dataset pascal --save-interval 4 \

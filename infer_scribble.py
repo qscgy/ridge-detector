@@ -50,15 +50,19 @@ class FixedImageDataset(Dataset):
         process (bool): whether to apply file preprocessing.
         normal_paths (List[str]): paths to normals, only for in_channels=6
     '''
-    def __init__(self, base_dir, crop_size, in_channels=3, gt=False, process=True, normal_paths=None):
+    def __init__(self, base_dir, seq_dir, crop_size, in_channels=3, gt=False, process=True, normal_paths=None):
         super().__init__()
-       
+
         self.normal_paths = normal_paths
         self.base_dir = base_dir
+        self.seq_dir = seq_dir
         self.process = process
-        if process:
+        if process and not gt:
             with open(os.path.join(base_dir,'test_set.pkl'), 'rb') as f:
                 self.images = pickle.load(f)
+        elif process:
+            with open(os.path.join(base_dir,'annotations_test.pkl'), 'rb') as f:
+                self.images = pickle.load(f).keys()
         else:
             with open('annotations_019.pkl', 'rb') as f:
                 self.images = list(pickle.load(f).keys())
@@ -71,7 +75,7 @@ class FixedImageDataset(Dataset):
                 # This was only used for demonstrating consistency over consecutive frames, in the paper.
                 self.depths = [os.path.join('/playpen/Datasets/geodepth2/019/colon_norm_preall_abs_nosm', l.split('/')[-1].split('.')[0]+'_disp.npy') for l in self.images]
             else:
-                self.depths = [get_depth_from_image(l) for l in self.images]
+                self.depths = [get_depth_from_image(os.path.join(seq_dir, l)) for l in self.images]
 
         # Use normals
         if in_channels==6:
@@ -84,16 +88,18 @@ class FixedImageDataset(Dataset):
             with open(os.path.join(base_dir, label_file), 'rb') as f:
                 in_labels = pickle.load(f)
             
-            if not process:
-                self.labels = in_labels
-            else:
-                # translate file names between the one used for the key and the image name in test_set.pkl (###/img_corr)
-                # see the comment in __getitem__ for further details.
-                self.labels = {}
-                for k in in_labels:
-                    path = k.split('/')[-1]
-                    test_path = os.path.join('/playpen/Datasets/geodepth2/', path[:-16], 'img_corr', path[-15:])
-                    self.labels[test_path] = in_labels[k]
+            self.labels = in_labels
+            # if not process:
+            #     self.labels = in_labels
+            # else:
+            #     # translate file names between the one used for the key and the image name in test_set.pkl (###/img_corr)
+            #     # see the comment in __getitem__ for further details.
+            #     self.labels = {}
+            #     for k in in_labels:
+            #         print(k)
+            #         path = k.split('/')[-1]
+            #         test_path = os.path.join('/playpen/Datasets/geodepth2/', path[:-16], 'img_corr', path[-15:])
+            #         self.labels[test_path] = in_labels[k]
 
         self.crop_size = crop_size
         self.transform = transforms.Compose([
@@ -112,14 +118,7 @@ class FixedImageDataset(Dataset):
     
     def __getitem__(self, index):
         im_name = self.images[index]
-        if self.process:
-            # The keys for the annotation dictionary are image files in the img_corr directories produced by LightAdjust.
-            # However, the actual network was trained on uncorrected images (`image` directory), and I have been testing with those,
-            # although there does not seem to be much differece.
-            # This line exists in order to ensure that the images passed to the network are from the `image` directory.
-            im = Image.open(im_name.replace('img_corr', 'image'))
-        else:
-            im = Image.open(im_name)
+        im = Image.open(os.path.join(self.seq_dir, im_name))
         ims = self.transform(im)
 
         if self.depths:
@@ -220,7 +219,8 @@ def main(args):
     model.eval()
 
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
-    test_data = FixedImageDataset(args.base_dir, crop_size=args.crop_size, in_channels=args.in_chan, gt=args.gt, process=not args.sequence)
+    test_data = FixedImageDataset(args.base_dir, args.sequence_dir, crop_size=args.crop_size, 
+                        in_channels=args.in_chan, gt=args.gt, process=not args.sequence)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
@@ -456,6 +456,8 @@ if __name__ == "__main__":
     parser.add_argument('--sequence', action='store_true', help='use 019 sequence images')
     parser.add_argument('--use-examples', action='store_true', help='use preselected examples or all test images')
     parser.add_argument('--figures', action='store_true', help='generate figures')
+
+    parser.add_argument('--sequence-dir', type=str, help='directory of colonoscopy sequences')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
