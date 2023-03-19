@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from data import make_data_loader
 from torchvision.utils import make_grid
 
-from losses import pixel_matching_loss
+from losses import pixel_matching_loss, SwirlLoss
 from models.deepboundary import DeepBoundary
 
 from rloss.pytorch.deeplabv3plus.mypath import Path
@@ -86,6 +86,9 @@ class Trainer(object):
             nclayer = NormalizedCutLoss(weight=args.ncloss, sigma_rgb=args.sigma_rgb_nc, sigma_xy=args.sigma_xy_nc, scale_factor=args.rloss_scale)
             print(nclayer)
             self.reg_losses['norm_cut_loss'] = nclayer
+        
+        if args.swirl > 0:
+            swirl_layer = SwirlLoss()
         
         # Cross-entropy loss between boundary regions and pixel prediction
         self.boundary_loss = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(mode='ce')
@@ -378,6 +381,8 @@ def main():
     parser.add_argument('--in-chan', type=int, default=3, help='number of input channels')
 
     parser.add_argument('--rw', action='store_true', default=False, help='use random walks (do not use!)')
+
+    parser.add_argument('--swirl', type=float, default=0, help='swirl loss weight')
 
     args = parser.parse_args()
     

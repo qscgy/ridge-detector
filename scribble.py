@@ -45,7 +45,7 @@ class ScribbleAnnotator:
         self.idx = start
 
         self.annotations = {}
-        self.dump_file = 'annotations_019.pkl'
+        self.dump_file = 'annotations.pkl'
         if os.path.isfile(self.dump_file):
             with open(self.dump_file, 'rb') as f:
                 self.annotations = pickle.load(f)

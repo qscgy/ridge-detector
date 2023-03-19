@@ -31,6 +31,7 @@ import time
 import multiprocessing
 import glob
 from natsort import natsorted
+from losses import SwirlLoss
 
 from rloss.pytorch.deeplabv3plus.DenseCRFLoss import DenseCRFLoss
 from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
