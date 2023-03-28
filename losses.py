@@ -17,11 +17,8 @@ def improved_arc_loss(output, locs, params):
     pass
 
 class SwirlLoss(nn.Module):
-    def __init__(self, side) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.side = side
-        self.ks = (2*side+1, 2*side+1)
-        self.unfold = nn.Unfold(kernel_size=self.ks)
         self.sobelx = torch.tensor([
             [1, 0, -1],
             [2, 0, -2],
@@ -49,23 +46,16 @@ class SwirlLoss(nn.Module):
         edges = torch.clamp(torch.nn.functional.conv2d(im, kernel, padding=(1, 1)), 0, 1)-im
         return edges
 
-    def forward(self, mask, normals):
+    def forward(self, mask, curl):
         '''
         Computes the alignment of the segmentation mask to the normals.
 
         Arguments:
-            mask (Tensor): BxHxW tensor of binary values (0 or 1) where 1 means a pixel is fold
+            mask (Tensor): BxHxW tensor of binary values (0 or 1) or probabilities (float in range [0,1])
             normals (Tensor): BxHxWx2 tensor of normal vectors projected into the imaging plane
         Returns:
             loss (float): the loss
         '''
-        # These should be precomputed; they are constant w.r.t. network params
-        dFxdy = torch.gradient(normals[:,0])[-2]
-        dFydx = torch.gradient(normals[:,1])[-1]
-        # dFxdy = torch.nn.functional.conv2d(normals[:,0].unsqueeze(1), self.sobelx, padding=1)
-        # dFydx = torch.nn.functional.conv2d(normals[:,1].unsqueeze(1), self.sobely, padding=1)
-        curl = dFxdy-dFydx
-
         loss = torch.sum(curl*mask)**2/mask.sum()
         return loss
 

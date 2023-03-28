@@ -54,6 +54,21 @@ class NormalizeImage(object):
 
         return img
 
+class NormalCurl(object):
+    '''Compute the curl of the projection of normals.'''
+
+    def __call__(self, sample):
+        if 'normal' not in sample:
+            return sample
+        
+        proj_normal = sample['normal'][...,:2,:,:]
+        dFxdy = torch.gradient(proj_normal[0])[-2]
+        dFydx = torch.gradient(proj_normal[1])[-1]
+        curl = dFxdy-dFydx
+        curl.unsqueeze_(0)
+        sample['curl'] = curl
+
+        return sample
 
 class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""

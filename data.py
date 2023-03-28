@@ -38,8 +38,20 @@ def get_depth_from_image(fname):
 
 def frame_num_to_index(fpath, frame):
     img_dir = os.path.dirname(fpath)
-    zero_frame = int(natsorted(os.listdir(img_dir))[0][5:11])
-    return frame-zero_frame
+    frames = natsorted(os.listdir(img_dir))
+    frames = [int(f[5:11]) for f in frames]
+    return frames.index(frame)
+
+def get_nr_output_from_image(fname, oname='normals'):
+    path = fname.split('/')
+    frame = int(path[-1].split('.')[0][5:])
+    index = frame_num_to_index(fname, frame)
+    num = path[-3]
+    spec = 'pred' if oname=='normals' else 'depth'
+    outs = os.path.join(*path[:-2], 'NFPS', 'images', f'{num}_{index:03d}', f'{num}_{index:03d}_nr_{spec}.npy')
+    if fname[0]=='/':
+        outs = '/'+outs
+    return outs
 
 def get_normals_from_image(fname):
     path = fname.split('/')
@@ -67,8 +79,9 @@ class FoldSegmentation(Dataset):
                 self.args = _args[0]
         else:
             self.args = _args
+        
         self.base_dir = self.args.base_dir
-        self.scribble_dir = os.path.join(self.base_dir, 'annotations')
+        self.scribble_dir = '/playpen/Datasets/scribble-samples/annotations'
         self.split = split
         self.fstroke = fstroke
         self.bstroke = bstroke
@@ -87,16 +100,6 @@ class FoldSegmentation(Dataset):
             with open('normal_paths.pkl', 'rb') as f:
                 self.normal_paths = pickle.load(f)
 
-        # if self.args.in_chan==4:
-        #     self.depths = [get_depth_from_image(l) for l in self.images]
-        # else:
-        #     self.depths = None
-        
-        # if self.args.in_chan==6:
-        #     self.normals = [get_normals_from_image(l) for l in self.images]
-        # else:
-        #     self.normals = None
-
         if self.split=='train':
             self.perm = self.perm[:int(0.9*len(self.perm))]
         elif self.split=='val':
@@ -111,7 +114,9 @@ class FoldSegmentation(Dataset):
     
     def __getitem__(self, index):
         im_name = self.images[self.perm[index]]
-        im = Image.open(im_name.replace('img_corr', 'image'))
+        im_path = os.path.join(self.base_dir, im_name)
+
+        im = Image.open(im_path.replace('img_corr', 'image'))
         fg_labels, bg_labels = self.labels[im_name]
         labels = np.ones((432, 540, 3))*255
         for i, l in enumerate(fg_labels):
@@ -131,11 +136,11 @@ class FoldSegmentation(Dataset):
             sample = {'image':im, 'label':Image.fromarray(labels)}
             if self.args.in_chan==4:
                 # sample['depth'] = Image.fromarray(np.load(self.depths[self.perm[index]]))
-                depth_arr = np.load(get_depth_from_image(im_name))
+                depth_arr = np.load(get_depth_from_image(im_path))
                 sample['depth'] = Image.fromarray(depth_arr)
                 # print(depth_arr.min(), depth_arr.max())
-            if self.args.in_chan==6:
-                normal_arr = np.load(self.normal_paths[im_name])
+            if self.args.in_chan==6 or self.args.swirl>0:
+                normal_arr = np.load(get_normals_from_image(im_path))
                 sample['normal'] = normal_arr
             
         if self.split == "train":
@@ -149,7 +154,8 @@ class FoldSegmentation(Dataset):
             RandomScaleCrop(base_size=self.args.base_size, crop_size=self.args.crop_size),
             RandomGaussianBlur(),
             Normalize(mean=MEAN, std=STDEV),
-            ToTensor()])
+            ToTensor(),
+            NormalCurl()])
 
         return composed_transforms(sample)
 
@@ -157,6 +163,7 @@ class FoldSegmentation(Dataset):
         composed_transforms = transforms.Compose([
             FixScaleCrop(crop_size=self.args.crop_size),
             Normalize(mean=MEAN, std=STDEV),
-            ToTensor()])
+            ToTensor(),
+            NormalCurl()])
 
         return composed_transforms(sample)

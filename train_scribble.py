@@ -88,7 +88,7 @@ class Trainer(object):
             self.reg_losses['norm_cut_loss'] = nclayer
         
         if args.swirl > 0:
-            swirl_layer = SwirlLoss()
+            self.swirl_layer = SwirlLoss()
         
         # Cross-entropy loss between boundary regions and pixel prediction
         self.boundary_loss = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(mode='ce')
@@ -129,6 +129,7 @@ class Trainer(object):
     def training(self, epoch):
         train_loss = 0.0
         train_celoss = 0.0
+        train_swirl_loss = 0.0
         self.model.train()
         tbar = tqdm(self.train_loader)
         num_batch_tr = len(self.train_loader)
@@ -146,6 +147,8 @@ class Trainer(object):
             # see function RandomScaleCrop in dataloaders/custom_transforms.py for the detail in data preprocessing
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
+                if self.args.swirl>0:
+                    curl = sample['curl'].cuda()
 
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
@@ -159,6 +162,7 @@ class Trainer(object):
 
             celoss = self.criterion(output, target)
             loss = celoss
+
             reg_lossvals = {}
 
             if self.args.bd_loss>0:
@@ -173,9 +177,13 @@ class Trainer(object):
                 reg_lossvals['long_thin_loss'] = lt_loss.item()
 
             probs=None
-            if self.args.densecrfloss>0 or self.args.ncloss>0:
+            if self.args.densecrfloss>0 or self.args.ncloss>0 or self.args.swirl>0:
                 probs = softmax(output)
                 denormalized_image = denormalizeimage(sample['image'], mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+                if self.args.swirl>0:
+                    swirl_loss = self.swirl_layer(probs[:,1], curl) 
+                    loss += swirl_loss * self.args.swirl
+                
                 for ls in self.reg_losses:
                     lv = self.reg_losses[ls](denormalized_image, probs, croppings)
                     if self.args.cuda:
@@ -188,6 +196,8 @@ class Trainer(object):
             self.optimizer.step()
             train_loss += loss.item()
             train_celoss += celoss.item()
+            if self.args.swirl>0:
+                train_swirl_loss += swirl_loss.item() * self.args.swirl
 
             self.total_iters += len(image)
             
@@ -196,6 +206,8 @@ class Trainer(object):
             
             self.writer.add_scalar('train/total_loss_iter', loss.item(), self.total_iters)
             self.writer.add_scalar('train/ce_loss', celoss.item(), self.total_iters)
+            if self.args.swirl>0:
+                self.writer.add_scalar('train/swirl_loss', swirl_loss.item(), self.total_iters)
             for l in reg_lossvals:
                 self.writer.add_scalar(f'train/{l}', reg_lossvals[l], self.total_iters)
 
@@ -234,6 +246,7 @@ class Trainer(object):
         self.evaluator.reset()
         tbar = tqdm(self.val_loader, desc='\r')
         test_loss = 0.0
+        softmax = nn.Softmax(dim=1)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
             if self.args.in_chan == 4:
@@ -244,12 +257,19 @@ class Trainer(object):
             target[target==254]=255
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
+            if self.args.swirl>0:
+                curl = sample['curl'].cuda()
+            
             with torch.no_grad():
                 if self.args.bd_loss>0 or self.args.lt_loss>0:
                     output, mask, params = self.model(image)
                 else:
                     output = self.model(image)
             loss = self.criterion(output, target)
+            if self.args.swirl>0:
+                    probs = softmax(output)
+                    loss += self.swirl_layer(probs[:,1], curl)*self.args.swirl
+            
             test_loss += loss.item()
             tbar.set_description('Test loss: %.3f' % (test_loss / (i + 1)))
             pred = output.data.cpu().numpy()
