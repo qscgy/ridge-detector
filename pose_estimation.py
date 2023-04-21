@@ -24,7 +24,7 @@ from typing import NamedTuple
 from cubic_spline import interp, Interpolator
 
 torch.autograd.set_detect_anomaly(True)
-device = 'cuda:0'
+device = 'cpu'
 
 class MyICPSoln(NamedTuple):
     Xt: torch.Tensor
@@ -38,14 +38,14 @@ class Aligner(nn.Module):
         super().__init__()
         self.R = nn.Parameter(torch.eye(3).unsqueeze(0))
         self.T = nn.Parameter(torch.zeros((1, 1, 3)))
-        self.s = nn.Parameter(torch.ones(1, 1))
-        # self.s = torch.ones((1,1)).cuda()
+        # self.s = nn.Parameter(torch.ones(1, 1))
+        self.s = torch.ones((1,1)).to(device)
 
         self.interp_z = Interpolator(n_pts, max=0.8)
     
     def forward(self, X):
         Xt = torch.clone(X)
-        Xt[0,:,2] = self.interp_z(X[0,:,2])
+        # Xt[0,:,2] = self.interp_z(X[0,:,2])
         Xt = self.s[:, None, None] * torch.bmm(Xt, self.R) + self.T[:, None, :]
         return Xt[0]
 
@@ -163,8 +163,8 @@ def get_point_clouds():
             ))
         else:
             depth_list = natsorted(glob(os.path.join(
-                base_path, 
-                'colon_norm_preall_abs_nosm/*_disp.npy'
+                base_path,
+               'colon_geo_light/nr4/*_disp.npy'
             )))
             depth = 1/np.load(depth_list[i])
         h, w = depth.shape
