@@ -138,9 +138,11 @@ class Trainer(object):
             image, target = sample['image'], sample['label']
             if self.args.in_chan == 4:
                 aux = sample['depth']
+                image = torch.cat((image, aux), 1)
             elif self.args.in_chan==6:
                 aux = sample['normal']
-            image = torch.cat((image, aux), 1)
+                image = torch.cat((image, aux), 1)
+
             croppings = (target!=254).float()
             target[target==254]=255
             # Pixels labeled 255 are those unlabeled pixels. Padded region are labeled 254.

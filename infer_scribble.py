@@ -128,16 +128,22 @@ def process_foldit(results_dir, size):
         images[i] = (im[...,1]==0) & (im[...,2]==0)
     return images
 
-def save_preds(preds, images, save_dir):
+def save_preds(preds, save_dir, images=None, save_np=True):
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
-        for i in range(preds.shape[0]):
-            im = cv2.cvtColor(preds[i].transpose(1,2,0)*255, cv2.COLOR_RGB2BGR)
-            # cv2.imshow(' ', im)
-            # cv2.waitKey(0)
-            path = images[i].split('/')
-            # print(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'))
-            cv2.imwrite(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'), im)
+    if save_np:
+        np.save(os.path.join(save_dir, 'preds.npy'), preds)
+
+    if images is None:
+        return
+    
+    for i in range(preds.shape[0]):
+        im = cv2.cvtColor(preds[i].transpose(1,2,0)*255, cv2.COLOR_RGB2BGR)
+        # cv2.imshow(' ', im)
+        # cv2.waitKey(0)
+        path = images[i].split('/')
+        # print(os.path.join(save_dir, f'{path[-3]}_{path[-1][:-4]}.png'))
+        cv2.imwrite(os.path.join(save_dir, f'{path[-1][:-4]}.png'), im)
 
 def postprocess(preds):
     output = np.zeros_like(preds)
@@ -146,8 +152,6 @@ def postprocess(preds):
         nblobs, labels, stats, _ = cv2.connectedComponentsWithStats(pred, connectivity=4)
 
 def main(args):
-
-    
     # Define Dataloader
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
     
@@ -204,6 +208,7 @@ def main(args):
             image = image.cuda()
         output = model(image)
         probs = softmax(output)
+        print(probs.shape)
         segmentations[i] = probs[:,1].detach().cpu()
         # images[i] = unnorm.detach().cpu()
         images[i] = denormalizeimage(image[:,:3], MEAN, STDEV)/255.0
@@ -342,18 +347,15 @@ def main(args):
 
         plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
 
-    preds_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-mine-jhu')
-    foldit_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'results-foldit-internal-jhu')
-    orig_dir = os.path.join(*(args.checkpoint.split('/')[:-1]), 'original-jhu')
-    if not os.path.isdir(preds_dir):
-        save_preds(my_preds, test_data.images, preds_dir)
-    if args.gt is not None:
-        if not os.path.isdir(foldit_dir) and args.foldit_path is not None:
-            save_preds(foldit_preds, test_data.images, foldit_dir)
-        if not os.path.isdir(orig_dir):
-            save_preds(images, test_data.images, orig_dir)
+    preds_dir = os.path.join(args.outdir, 'results-mine')
+    foldit_dir = os.path.join(args.outdir, 'results-foldit-internal')
+    save_preds(segmentations, preds_dir, test_data.images if args.use_examples else None)
+    # if args.gt is not None:
+    #     if not os.path.isdir(foldit_dir) and args.foldit_path is not None:
+    #         save_preds(foldit_preds, foldit_dir, test_data.images)
 
-    plt.show()
+    # plt.show()
+    plt.savefig(os.path.join(args.outdir, 'folds.png'))
     return None
 
 def find_best(args):
@@ -420,6 +422,7 @@ if __name__ == "__main__":
     parser.add_argument('--figures', action='store_true', help='generate figures')
     parser.add_argument('--gt', type=str, default=None)
     parser.add_argument('--foldit-path', type=str, default=None)
+    parser.add_argument('--outdir', type=str, default='.', help='output directory for images')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
