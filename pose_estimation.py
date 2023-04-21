@@ -135,14 +135,14 @@ def flatten_each_fold(depth, seg_mask):
     return depth
 
 
-base_path = '/bigpen/Datasets/oblique/Auto_A_Aug18_13-10-05_003'
+base_path = '/playpen/Datasets/geodepth2/019'
 seg_dir = base_path+'/results-mine'
 
 num = base_path.split('/')[-1]
 use_nr = False
 
-p1 = 401
-p2 = 403
+p1 = 26
+p2 = 32
 
 def get_point_clouds():
     preds = np.load(os.path.join(seg_dir, 'preds.npy'))
@@ -164,7 +164,7 @@ def get_point_clouds():
         else:
             depth_list = natsorted(glob(os.path.join(
                 base_path, 
-                'colon_geo_light/joint/*_disp.npy'
+                'colon_norm_preall_abs_nosm/*_disp.npy'
             )))
             depth = 1/np.load(depth_list[i])
         h, w = depth.shape
@@ -196,12 +196,12 @@ fig = plot_scene({
         "aligned": Pointclouds(icp.Xt)
     },
 }, pointcloud_marker_size=2)
-fig.show()
+fig.write_html('pointclouds/3.html')
 
 print(icp.interp)
 print(icp.R)
 print(icp.T)
 print(icp.s)
 
-plt.plot(icp.interp[0].cpu().detach().numpy(), icp.interp[1].cpu().detach().numpy())
-plt.show()
+# plt.plot(icp.interp[0].cpu().detach().numpy(), icp.interp[1].cpu().detach().numpy())
+# plt.show()
