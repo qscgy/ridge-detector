@@ -105,10 +105,10 @@ class FixedImageDataset(Dataset):
             labels = np.ones((432, 540, 3))*255
             for l in fg_labels:
                 if len(l) > 0:
-                    cv2.polylines(labels, np.array([l]), False, (1, 0, 0), 2)
+                    cv2.polylines(labels, np.array([l]), False, (1, 0, 0), 5)
             for l in bg_labels:
                 if len(l) > 0:
-                    cv2.polylines(labels, np.array([l]), False, (0, 0, 0), 2)
+                    cv2.polylines(labels, np.array([l]), False, (0, 0, 0), 9)
             labels = cv2.resize(labels, (self.crop_size, self.crop_size))
             labels[labels>1] = 255
             labels = labels[:,:,0].astype(np.uint8)
@@ -269,8 +269,8 @@ def main(args):
             print(f'{k1} & {line} \\\\ \\hline')
         print(f'Accuracy & & & (\\textbf{{{my_report["accuracy"]:.2f}}}, {foldit_report["accuracy"]:.2f})')
 
-    if not args.figures and args.gt is not None:
-        return my_accs.mean(), np.std(my_accs), my_report['accuracy']
+    # if not args.figures and args.gt is not None:
+        # return my_accs.mean(), np.std(my_accs), my_report['accuracy']
         
     if args.use_examples:
         im_inds = [0, 1, 2, 3, 7, 14]
@@ -311,15 +311,25 @@ def main(args):
     
     if args.use_examples:
         foldit_pred_mask_2 = process_foldit(f'/playpen/CEP/results/foldit_internal/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
-        foldit_pred_list_2 = foldit_pred_mask[labels<2].astype(np.uint8)
+        foldit_pred_list_2 = foldit_pred_mask[labels.squeeze()<2].astype(np.uint8)
         foldit_preds2 = np.copy(images).transpose(1,0,2,3)
         foldit_preds2[0][foldit_pred_mask_2] = 0
         foldit_preds2 = foldit_preds2.transpose(1, 0, 2, 3)
         grid_f2 = make_grid(torch.from_numpy(foldit_preds2[im_inds]), ncol).numpy().transpose(1,2,0)
 
-        foldit_report2 = classification_report(label_list, foldit_pred_list_2, target_names=['Not ridge', 'Ridge'], output_dict=True)
-        print('Foldit-UNC\n')
-        print(pd.DataFrame(foldit_report2).transpose())
+        scribbles = labels[im_inds].squeeze()
+        print(np.unique(scribbles))
+        im_scribbles = np.copy(images[im_inds]).transpose(0,2,3,1)
+        print(scribbles.shape, im_scribbles.shape)
+        for i in range(len(im_inds)):
+            im_scribbles[i,scribbles[i]==0] = np.array([0,0,1])
+            im_scribbles[i,scribbles[i]==1] = np.array([0,1,0])
+        im_scribbles = im_scribbles.transpose(0,3,1,2)
+        grid_s = make_grid(torch.from_numpy(im_scribbles), ncol).numpy().transpose(1,2,0)
+
+        # foldit_report2 = classification_report(label_list, foldit_pred_list_2, target_names=['Not ridge', 'Ridge'], output_dict=True)
+        # print('Foldit-UNC\n')
+        # print(pd.DataFrame(foldit_report2).transpose())
 
         rois = [((42, 157),(114,210), (0,1,0), 2),
         ((397,8), (426,71), (0,1,0), 2),
@@ -336,14 +346,13 @@ def main(args):
             grid_m = cv2.ellipse(grid_m.copy(), (344, 169), (35, 25), 0, 0, 360, (0.6,0,1), 3)
 
         plt.figure(figsize=(13,6))
-        # plt.imshow(np.vstack((grid_o,grid_m,grid_f,grid_f2)))
-        plt.imshow(np.vstack((grid_o,grid_m,grid_f)))
+        plt.imshow(np.vstack((grid_o,grid_m,grid_f,grid_s)))
         plt.xticks([])
         plt.yticks([])
         plt.text(-20,216/2, 'Original', fontsize=22, horizontalalignment='right', verticalalignment='center')
         plt.text(-20, 216*1.5, 'Ours', fontsize=22, horizontalalignment='right', verticalalignment='center')
         plt.text(-20, 216*2.5, 'FoldIt', fontsize=22, horizontalalignment='right', verticalalignment='center')
-        # plt.text(-20, 216*3.5, 'FoldIt-UNC', fontsize=22, horizontalalignment='right', verticalalignment='center')
+        plt.text(-20, 216*3.5, 'Scribbles', fontsize=22, horizontalalignment='right', verticalalignment='center')
 
         plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'examples_internal_public{"" if not args.sequence else "-seq"}.png'), bbox_inches='tight')
 

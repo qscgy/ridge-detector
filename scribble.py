@@ -9,6 +9,7 @@ import pickle
 import random
 import shutil
 import sys
+import argparse
 
 def get_all_images(base_dir):
     im_dirs = os.listdir(base_dir)
@@ -29,23 +30,27 @@ def copy_random_sample(files, dst, n=200):
         im_dir = im.split('/')[-3]
         shutil.copyfile(im, os.path.join(dst, im_dir+'_'+fname))
 
-base_dir = '/playpen/Datasets/our-019-their-ma1'
-
 # all_images = natsorted([os.path.join(base_dir, im) for im in os.listdir(base_dir)])
 # copy_random_sample(all_images, 200)
 
 class ScribbleAnnotator:
-    def __init__(self, start=0):
-        self.all_images = get_all_images(base_dir)
+    def __init__(self, args):
+        if args.base_dir[-4:]=='.pkl':
+            with open(args.base_dir, 'rb') as f:
+                self.all_images = pickle.load(f)
+        else:
+            self.all_images = get_all_images(args.base_dir)
+        
         print(f'Number of image files: {len(self.all_images)}')
         self.points = ([],[])
         self.drawing = False
         self.label = 0
         self.ix, self.iy = -1,-1
-        self.idx = start
+        self.idx = args.start
+        self.brush_size = args.brush_size
 
         self.annotations = {}
-        self.dump_file = 'annotations.pkl'
+        self.dump_file = args.dump_file
         if os.path.isfile(self.dump_file):
             with open(self.dump_file, 'rb') as f:
                 self.annotations = pickle.load(f)
@@ -81,7 +86,7 @@ class ScribbleAnnotator:
         elif event == cv2.EVENT_MOUSEMOVE:
             if self.drawing:
                 # cv2.circle(img, (x,y), 5, (0,0,255), -1)
-                cv2.line(self.img, (self.ix, self.iy), (x, y), (255,0,0), 2)
+                cv2.line(self.img, (self.ix, self.iy), (x, y), (255,0,0), args.brush_size)
                 self.points[self.label][-1].append([x, y])
                 self.ix, self.iy = x, y
         elif event == cv2.EVENT_LBUTTONUP:
@@ -95,9 +100,9 @@ class ScribbleAnnotator:
 
     def restore_lines(self):
         for l in self.points[0]:
-            cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (0,255,0), 2)
+            cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (0,255,0), self.brush_size)
         for l in self.points[1]:
-            cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (255,0,0), 2)
+            cv2.polylines(self.img, np.array([l], dtype=np.int32), False, (255,0,0), self.brush_size)
 
     def load_img(self):
         # print(self.all_images[self.idx])
@@ -146,5 +151,12 @@ class ScribbleAnnotator:
         print(f'Total images with annotations: {len(self.annotations.keys())}')
 
 if __name__=='__main__':
-    scr = ScribbleAnnotator(0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--start', type=int, default=0)
+    parser.add_argument('--base_dir', type=str)
+    parser.add_argument('--dump_file', type=str)
+    parser.add_argument('-b', '--brush-size', type=int, default=2)
+    args = parser.parse_args()
+
+    scr = ScribbleAnnotator(args)
     scr.mainloop()
