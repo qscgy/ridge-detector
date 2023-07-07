@@ -7,8 +7,8 @@ import glob
 import matplotlib.pyplot as plt
 from PIL import Image, ImageFont, ImageDraw
 
-def generate_video(files):
-    video_name = 'vid_020.avi'
+def generate_video(files, num):
+    video_name = f'vid_{num}.avi'
     frame = cv2.imread(files[0])
     h, w, c = frame.shape
     video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc('M','J','P','G'), 30, (w, h))
@@ -17,12 +17,15 @@ def generate_video(files):
     video.release()
 
 border = 10
+num = '035'
 
-base_dir = "/playpen/Datasets/geodepth2/020"
+base_dir = f"/playpen/Datasets/geodepth2/{num}"
 preds = np.load(join(base_dir, "results-mine/preds.npy"))
-foldit_pred_ims = sorted(glob.glob("/playpen/CEP/results/foldit_public_020/test_latest/images/*_fake_B.png"))
+foldit_pred_ims = sorted(glob.glob(f"/playpen/CEP/results/foldit_public_{num}/test_latest/images/*_fake_B.png"))
 image_files = sorted(glob.glob(join(base_dir, "image/*.jpg")))
 out_dir = join(base_dir, 'video')
+if not os.path.isdir(out_dir):
+    os.makedirs(out_dir)
 font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 40)
 out_files = []
 
@@ -58,4 +61,4 @@ for i,f in enumerate(image_files):
     out_im.save(fname)
     out_files.append(fname)
 
-generate_video(out_files)
+generate_video(out_files, num)

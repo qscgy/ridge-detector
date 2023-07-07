@@ -3,6 +3,8 @@
 results/
 run/
 .vscode/
+videos/
+videos/*
 
 ## Copied from meng-tank/rloss ##
 *.pyc

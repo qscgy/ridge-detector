@@ -39,7 +39,7 @@ from rloss.pytorch.deeplabv3plus.NormalizedCutLoss import NormalizedCutLoss
 global grad_seg
 
 class FixedImageDataset(Dataset):
-    def __init__(self, data_path, crop_size, in_channels=3, gt=None):
+    def __init__(self, data_path, crop_size, in_channels=3, gt=None, pattern='*.jpg'):
         super().__init__()
 
         if 'annotations' in data_path:
@@ -49,7 +49,7 @@ class FixedImageDataset(Dataset):
             with open(data_path, 'rb') as f:
                 self.images = pickle.load(f)
         else:   # data_path is a path
-            self.images = glob.glob(os.path.join(data_path, '*.jpg'))
+            self.images = glob.glob(os.path.join(data_path, pattern))
         
         self.images = natsorted(self.images)
         self.depths = None
@@ -194,20 +194,25 @@ def main(args):
         crop_size=args.crop_size, 
         in_channels=args.in_chan, 
         gt=args.gt,
+        pattern=f'*.{args.extension}'
     )
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, **kwargs)
     segmentations = torch.zeros((len(test_loader), args.batch_size, args.crop_size, args.crop_size))
     images = torch.zeros((len(test_loader), args.batch_size, 3, args.crop_size, args.crop_size))
     softmax = nn.Softmax(dim=1)
-    labels = torch.zeros_like(segmentations) 
+    labels = torch.zeros_like(segmentations)
+    times = []
 
     for i, (image, label) in enumerate(test_loader):
-        if args.gt is not None:
+        if args.gt is not None:     # ground truth labels are provided, so we can calculate metrics
             labels[i] = label
         if not args.no_cuda:
             image = image.cuda()
+        start = time.time()
         output = model(image)
         probs = softmax(output)
+        elapsed = time.time()-start
+        times.append(elapsed)
         print(probs.shape)
         segmentations[i] = probs[:,1].detach().cpu()
         # images[i] = unnorm.detach().cpu()
@@ -217,18 +222,26 @@ def main(args):
     images = images.reshape(images.shape[0]*images.shape[1], *images.shape[2:]).numpy()
     thresh = 0.3    # TODO this is important! Dropping thresh to 0.3 from 0.5 improves accuracy!
     pred = (segmentations > thresh)
+
+    # times = np.array(times)
+    # print(f"Time: {times.mean():.04f}, SD={times.std():.04f}, {1/times.mean():.04f} fps")
+    # print(f"Excluding first Time: {times[1:].mean():.04f}, SD={times[1:].std():.04f}")
+    # plt.figure()
+    # plt.plot(np.arange(len(times)), times)
+    # plt.show()
     
     foldit_pred_mask = process_foldit(f'/playpen/CEP/results/foldit_public/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
 
+    # Compute and save metrics if ground-truth labels are provided
     if args.gt is not None:
         labels = labels.reshape(*segmentations.shape)
+
         # compute metrics
         pred_list = pred[labels<2].astype(np.uint8)
         label_list = labels[labels<2]
         my_report = classification_report(label_list, pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
         foldit_pred_list = foldit_pred_mask[labels<2].astype(np.uint8)
         foldit_report = classification_report(label_list, foldit_pred_list, target_names=['Not fold', 'Fold'], output_dict=True)
-        # print(confusion_matrix(label_list, foldit_pred_list))
 
         my_accs = np.zeros(segmentations.shape[0])
         for i in range(len(my_accs)):
@@ -242,7 +255,6 @@ def main(args):
                 print('fold', i, int(report_i['Fold']['support']*report_i['Fold']['recall']))
         print(my_accs.mean())
         print(np.std(my_accs))
-        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'my_accs.npy'), my_accs)
 
         fi_accs = np.zeros(segmentations.shape[0])
         for i in range(len(my_accs)):
@@ -252,10 +264,10 @@ def main(args):
             fi_accs[i] = report_i['accuracy']
         print(fi_accs.mean())
         print(np.std(fi_accs))
-        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'fi_accs.npy'), fi_accs)
 
-        # plt.boxplot([my_accs, fi_accs])
-        # plt.show()
+        # Save accuracies for each frame in the same directory as the model weight file
+        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'my_accs.npy'), my_accs)
+        np.save(os.path.join(*args.checkpoint.split('/')[:-1], 'fi_accs.npy'), fi_accs)
 
         my_df = pd.DataFrame(my_report).transpose()
         foldit_df = pd.DataFrame(foldit_report).transpose()
@@ -268,9 +280,6 @@ def main(args):
             line = ' & '.join([f'(\\textbf{{{my_report[k1][k2]:.2f}}}, {foldit_report[k1][k2]:.2f})' for k2 in ['precision', 'recall', 'f1-score']])
             print(f'{k1} & {line} \\\\ \\hline')
         print(f'Accuracy & & & (\\textbf{{{my_report["accuracy"]:.2f}}}, {foldit_report["accuracy"]:.2f})')
-
-    # if not args.figures and args.gt is not None:
-        # return my_accs.mean(), np.std(my_accs), my_report['accuracy']
         
     if args.use_examples:
         im_inds = [0, 1, 2, 3, 7, 14]
@@ -281,7 +290,7 @@ def main(args):
         im_inds = list(range(len(images)))
         ncol = int(np.sqrt(len(im_inds)))
 
-    # Visualize prediction
+    # Visualize predictions
     fig, ax = plt.subplots(1, 3 if args.foldit_path is not None else 2, figsize=(20, 7))
     plt.suptitle(f'Experiment {args.checkpoint.split("/")[-2].split("_")[-1]} with {args.backbone} backbone')
     grid_o = make_grid(torch.from_numpy(images[im_inds]), ncol).numpy().transpose(1,2,0)
@@ -309,6 +318,7 @@ def main(args):
     plt.savefig(os.path.join(*(args.checkpoint.split('/')[:-1]), f'eval_thresh_{thresh}.png'), bbox_inches='tight')
     # plt.close()
     
+    # Plot examples with annotations showing positives and negatives
     if args.use_examples:
         foldit_pred_mask_2 = process_foldit(f'/playpen/CEP/results/foldit_internal/test_latest/images{"" if not args.sequence else "-test"}', (216, 216))
         foldit_pred_list_2 = foldit_pred_mask[labels.squeeze()<2].astype(np.uint8)
@@ -364,7 +374,7 @@ def main(args):
     #         save_preds(foldit_preds, foldit_dir, test_data.images)
 
     # plt.show()
-    plt.savefig(os.path.join(args.outdir, 'folds.png'))
+    # plt.savefig(os.path.join(args.outdir, 'folds.png'))
     return None
 
 def find_best(args):
@@ -432,6 +442,7 @@ if __name__ == "__main__":
     parser.add_argument('--gt', type=str, default=None)
     parser.add_argument('--foldit-path', type=str, default=None)
     parser.add_argument('--outdir', type=str, default='.', help='output directory for images')
+    parser.add_argument('--extension', '-e', type=str, default='jpg', help='input image file extension')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
